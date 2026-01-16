@@ -66,6 +66,7 @@ public class OrderBookSide {
      * @throws IllegalStateException if the book side is empty
      */
     public Order peekBestOrder() {
+        // Defensive check
         if (priceLevels.isEmpty()) {
             throw new IllegalStateException("Cannot peek order from empty book side");
         }
@@ -84,7 +85,7 @@ public class OrderBookSide {
      *
      * @param order the order to add
      */
-    public void add(Order order) {
+    public void addOrder(Order order) {
         Objects.requireNonNull(order, "order must not be null");
 
         long price = order.getPrice();
@@ -102,7 +103,7 @@ public class OrderBookSide {
      * if it is no longer active - FILLED or CANCELLED.
      * If the price level becomes empty, it is also removed entirely.
      */
-    public void removeHeadIfInactive() {
+    public void removeHeadOrderIfInactive() {
         var bestPriceLevel = priceLevels.firstEntry();
         if (bestPriceLevel == null) {
             return;

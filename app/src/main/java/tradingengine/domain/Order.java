@@ -1,6 +1,7 @@
 package tradingengine.domain;
 
 import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 
 public class Order {
@@ -9,16 +10,17 @@ public class Order {
     private final String id = UUID.randomUUID().toString();
     private final OrderSide side;
     private final long price;
-    private final Instant timestamp = Instant.now();
+    private final Instant timestamp;
 
     // Mutable order fields
     private long remainingQty;
     private OrderStatus status = OrderStatus.NEW;
 
-    public Order(OrderSide side, long price, long quantity) {
+    public Order(OrderSide side, long price, long quantity, Instant timestamp) {
         this.side = OrderConstraints.requireValidSide(side);
         this.price = OrderConstraints.requireValidPrice(price);
         this.remainingQty = OrderConstraints.requireValidQuantity(quantity);
+        this.timestamp = Objects.requireNonNull(timestamp, "timestamp must not be null");
     }
 
     public String getId() {
@@ -52,13 +54,17 @@ public class Order {
 
     /**
      * Execute the order for the requested quantity
-     * @param requestedQty The quantity to fill i.e. resting or incoming quantity
-     * @return The actual quantity filled
+     * @param requestedQty The quantity to execute i.e. resting or incoming quantity
+     * @return The actual quantity executed
      */
     public long execute(long requestedQty) {
+        if (requestedQty <= 0) {
+            throw new IllegalArgumentException("Requested quantity to execute must be positive");
+        }
+
         // Invariant: Remaining quantity cannot be negative
-        long filled = Math.min(requestedQty, remainingQty);
-        remainingQty -= filled;
+        long filledQty = Math.min(requestedQty, remainingQty);
+        remainingQty -= filledQty;
 
         // Invariant: order status must reflect remaining quantity
         if (remainingQty == 0) {
@@ -67,14 +73,14 @@ public class Order {
             status = OrderStatus.PARTIALLY_FILLED;
         }
 
-        return filled;
+        return filledQty;
     }
 
     /** Check if the order is still active (i.e., can be matched) 
      * @return true if the order is active, false otherwise
      */
     public boolean isActive() {
-        return status == OrderStatus.NEW || status == OrderStatus.PARTIALLY_FILLED;
+        return remainingQty > 0 && status != OrderStatus.CANCELLED;
     }
 
 }

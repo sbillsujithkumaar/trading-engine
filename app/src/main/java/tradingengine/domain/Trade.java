@@ -1,6 +1,7 @@
 package tradingengine.domain;
 
 import java.time.Instant;
+import java.util.Objects;
 
 /**
  * A Trade represents a completed execution between a buy order and a sell order.
@@ -14,13 +15,11 @@ public record Trade(
         Instant timestamp
 ) {
 
-    public Trade(String buyOrderId, String sellOrderId, long price, long quantity) {
-        this(
-        TradeConstraints.requireValidOrderId(buyOrderId, "Buy"),
-        TradeConstraints.requireValidOrderId(sellOrderId, "Sell"),
-        TradeConstraints.requireValidPrice(price),
-        TradeConstraints.requireValidQuantity(quantity),
-        Instant.now()
-        );
+    public Trade {
+        buyOrderId = TradeConstraints.requireValidOrderId(buyOrderId, "Buy");
+        sellOrderId = TradeConstraints.requireValidOrderId(sellOrderId, "Sell");
+        price = TradeConstraints.requireValidPrice(price);
+        quantity = TradeConstraints.requireValidQuantity(quantity);
+        timestamp = Objects.requireNonNull(timestamp, "timestamp must not be null");
     }
 }

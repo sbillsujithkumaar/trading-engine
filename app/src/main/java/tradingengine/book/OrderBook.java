@@ -3,6 +3,8 @@ package tradingengine.book;
 import tradingengine.domain.Order;
 import tradingengine.domain.OrderSide;
 
+import java.util.Objects;
+
 /**
  * Represents the complete order book
  *
@@ -30,11 +32,18 @@ public class OrderBook {
      *
      * @param order the order to add
      */
-    public void add(Order order) {
+    public void addOrder(Order order) {
+        // Validate input - cannot be null or inactive
+        Objects.requireNonNull(order, "order must not be null");
+        if (!order.isActive()) {
+            throw new IllegalArgumentException("inactive orders cannot be added to the book");
+        }
+
+
         if (order.getSide() == OrderSide.BUY) {
-            buySide.add(order);
+            buySide.addOrder(order);
         } else {
-            sellSide.add(order);
+            sellSide.addOrder(order);
         }
     }
 
@@ -46,10 +55,17 @@ public class OrderBook {
     }
 
     /**
-     * @return {@code true} if at least one BUY and one SELL order exist
+     * @return {@code true} if at least one resting BUY order exist
      */
-    public boolean hasBothSides() {
-        return !buySide.isEmpty() && !sellSide.isEmpty();
+    public boolean hasBuyResting() {
+        return !buySide.isEmpty();
+    }
+
+    /**
+     * @return {@code true} if at least one resting SELL order exist
+     */
+    public boolean hasSellResting() {
+        return !sellSide.isEmpty();
     }
 
     /**
@@ -79,21 +95,20 @@ public class OrderBook {
     }
 
     /**
-     * Determines whether price crossing exists in the book.
+     * Returns whether the incoming order can execute immediately against
+     * the current best resting order on the opposite side.
      *
-     * <p>
-     * A crossing occurs when:
-     * <pre>
-     * bestBid >= bestAsk
-     * </pre>
+     * <p>This is a matching-time predicate (executability), not just "does liquidity exist".
      *
-     * @return {@code true} if matching is possible
+     * @param incoming the incoming order
+     * @return true if there is resting liquidity AND prices cross for this incoming order
      */
-    public boolean hasCrossingPrices() {
-        if (!hasBothSides()) {
-            return false;
+    public boolean canExecuteIncoming(Order incoming) {
+        if (incoming.getSide() == OrderSide.BUY) {
+            return !sellSide.isEmpty() && incoming.canMatch(sellSide.bestPrice());
+        } else {
+            return !buySide.isEmpty() && incoming.canMatch(buySide.bestPrice());
         }
-        return bestBid() >= bestAsk();
     }
 
     /**
