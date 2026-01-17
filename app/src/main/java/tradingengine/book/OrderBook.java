@@ -7,6 +7,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Represents the complete order book
@@ -60,15 +61,29 @@ public class OrderBook {
      * @return {@code true} if the order was removed
      */
     public boolean cancelOrder(String orderId) {
+        return cancelOrderAndGetLocator(orderId).isPresent();
+    }
+
+    /**
+     * Cancel an order by id and return its locator when present.
+     *
+     * @param orderId the order id to cancel
+     * @return locator of the cancelled order, or empty if not found
+     * @implNote Used by the matching engine to emit cancel events with side and price.
+     */
+    public Optional<OrderLocator> cancelOrderAndGetLocator(String orderId) {
         Objects.requireNonNull(orderId, "orderId must not be null");
         OrderLocator locator = orderIndex.get(orderId);
         if (locator == null) {
-            return false;
+            return Optional.empty();
         }
         OrderBookSide side = sideFor(locator.side());
         boolean removed = side.cancelOrderById(orderId, locator);
         orderIndex.remove(orderId);
-        return removed;
+        if (!removed) {
+            return Optional.empty();
+        }
+        return Optional.of(locator);
     }
 
     /**

@@ -2,15 +2,21 @@ package tradingengine.matchingengine;
 
 import tradingengine.book.OrderBook;
 import tradingengine.book.OrderBookSide;
+import tradingengine.book.OrderLocator;
 import tradingengine.domain.Order;
 import tradingengine.domain.OrderSide;
 import tradingengine.domain.Trade;
+import tradingengine.events.EventDispatcher;
+import tradingengine.events.OrderBookEvent;
+import tradingengine.events.OrderBookEventType;
+import tradingengine.events.TradeExecutedEvent;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Deterministic matching engine implementing price–time priority.
@@ -29,6 +35,7 @@ import java.util.Objects;
  * <ul>
  *   <li>Order storage to {@link OrderBook}</li>
  *   <li>Order state transitions to {@link Order}</li>
+ *   <li>Event emission to {@link tradingengine.events.EventDispatcher}</li>
  * </ul>
  *
  * <p>
@@ -44,12 +51,13 @@ public class MatchingEngine {
 
     private final OrderBook book;
     private final Clock clock;
+    private final EventDispatcher dispatcher;
 
     /**
      * Creates a matching engine with a fresh, empty order book
      */
     public MatchingEngine() {
-        this(new OrderBook(), Clock.systemUTC());
+        this(new OrderBook(), Clock.systemUTC(), new EventDispatcher());
     }
 
     /**
@@ -58,7 +66,7 @@ public class MatchingEngine {
      * @param book the order book instance
      */
     public MatchingEngine(OrderBook book) {
-        this(book, Clock.systemUTC());
+        this(book, Clock.systemUTC(), new EventDispatcher());
     }
 
     /**
@@ -68,8 +76,20 @@ public class MatchingEngine {
      * @param clock the time source for trade timestamps
      */
     public MatchingEngine(OrderBook book, Clock clock) {
+        this(book, clock, new EventDispatcher());
+    }
+
+    /**
+     * Creates a matching engine with an existing order book, clock, and dispatcher.
+     *
+     * @param book the order book instance
+     * @param clock the time source for trade timestamps
+     * @param dispatcher the event dispatcher
+     */
+    public MatchingEngine(OrderBook book, Clock clock, EventDispatcher dispatcher) {
         this.book = Objects.requireNonNull(book, "order book must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
+        this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher must not be null");
     }
 
     /**
@@ -100,6 +120,12 @@ public class MatchingEngine {
         // If incoming order is still active (not fully filled), add to order book
         if (incoming.isActive()) {
             book.addOrder(incoming);
+            dispatcher.publish(new OrderBookEvent(
+                    incoming.getSide(),
+                    incoming.getPrice(),
+                    OrderBookEventType.ADD,
+                    Instant.now(clock)
+            ));
         }
 
         return trades;
@@ -109,10 +135,22 @@ public class MatchingEngine {
      * Cancel an order by id.
      *
      * @param orderId the order id to cancel
-     * @return {@code true} if the order was found
+     * @return {@code true} if the order was found and cancelled
      */
     public boolean cancel(String orderId) {
-        return book.cancelOrder(orderId);
+        Objects.requireNonNull(orderId, "orderId must not be null");
+        Optional<OrderLocator> locator = book.cancelOrderAndGetLocator(orderId);
+        if (locator.isEmpty()) {
+            return false;
+        }
+        OrderLocator cancelled = locator.get();
+        dispatcher.publish(new OrderBookEvent(
+                cancelled.side(),
+                cancelled.price(),
+                OrderBookEventType.CANCEL,
+                Instant.now(clock)
+        ));
+        return true;
     }
 
 
@@ -137,9 +175,18 @@ public class MatchingEngine {
 
             Trade trade = executeTrade(incoming, resting);
             trades.add(trade);
+            dispatcher.publish(new TradeExecutedEvent(trade, trade.timestamp()));
 
             OrderSide restingSide = (incoming.getSide() == OrderSide.BUY) ? OrderSide.SELL : OrderSide.BUY;
-            book.removeBestOrderIfInactive(restingSide);
+            Order removed = book.removeBestOrderIfInactive(restingSide);
+            if (removed != null) {
+                dispatcher.publish(new OrderBookEvent(
+                        removed.getSide(),
+                        removed.getPrice(),
+                        OrderBookEventType.REMOVE,
+                        Instant.now(clock)
+                ));
+            }
         }
     }
 

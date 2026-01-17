@@ -131,11 +131,13 @@ public class OrderBookSide {
         Objects.requireNonNull(orderId, "orderId must not be null");
         Objects.requireNonNull(locator, "locator must not be null");
 
+        // find the price level
         OrdersQueue queue = priceLevels.get(locator.price());
         if (queue == null) {
             return false;
         }
 
+        
         Order removed = queue.removeById(orderId);
         if (removed == null) {
             return false;

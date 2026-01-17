@@ -8,6 +8,7 @@
 plugins {
     // Apply the java plugin to add support for building a JVM project.
     id 'java'
+    id 'application'
 }
 
 repositories {
@@ -30,6 +31,10 @@ java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
     }
+}
+
+application {
+    mainClass = 'tradingengine.App'
 }
 
 tasks.named('test') {
