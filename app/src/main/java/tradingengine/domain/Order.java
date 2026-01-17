@@ -5,7 +5,6 @@ import java.util.Objects;
 import java.util.UUID;
 
 public class Order {
-
     // Immutable order fields
     private final String id = UUID.randomUUID().toString();
     private final OrderSide side;
@@ -61,6 +60,9 @@ public class Order {
         if (requestedQty <= 0) {
             throw new IllegalArgumentException("Requested quantity to execute must be positive");
         }
+        if (status == OrderStatus.CANCELLED) {
+            throw new IllegalStateException("Cannot execute a cancelled order");
+        }
 
         // Invariant: Remaining quantity cannot be negative
         long filledQty = Math.min(requestedQty, remainingQty);
@@ -74,6 +76,14 @@ public class Order {
         }
 
         return filledQty;
+    }
+
+    /** Cancel the order if it is not already cancelled or filled */
+    public void cancel() {
+        if (status == OrderStatus.CANCELLED || status == OrderStatus.FILLED) {
+            return;
+        }
+        status = OrderStatus.CANCELLED;
     }
 
     /** Check if the order is still active (i.e., can be matched) 

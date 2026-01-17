@@ -3,6 +3,9 @@ package tradingengine.book;
 import tradingengine.domain.Order;
 import tradingengine.domain.OrderSide;
 
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -11,19 +14,22 @@ import java.util.Objects;
  * <p>The order book maintains both BUY and SELL sides and exposes
  * price-level state required by the matching engine.
  *
- * <p>This class does not perform trade matching or execution.
+ * <p>This class does not perform trade matching or execution. Cancellations
+ * remove orders immediately to keep top-of-book queries accurate.
  */
 public class OrderBook {
 
-    private final BuyOrderBookSide buySide;
-    private final SellOrderBookSide sellSide;
+    private final OrderBookSide buySide;
+    private final OrderBookSide sellSide;
+    private final Map<String, OrderLocator> orderIndex;
 
     /**
      * Creates an empty order book.
      */
     public OrderBook() {
-        this.buySide = new BuyOrderBookSide();
-        this.sellSide = new SellOrderBookSide();
+        this.buySide = new OrderBookSide(Comparator.reverseOrder());
+        this.sellSide = new OrderBookSide(Comparator.naturalOrder());
+        this.orderIndex = new HashMap<>();
     }
 
     /**
@@ -39,33 +45,51 @@ public class OrderBook {
             throw new IllegalArgumentException("inactive orders cannot be added to the book");
         }
 
-
         if (order.getSide() == OrderSide.BUY) {
-            buySide.addOrder(order);
+            buySide.addRestingOrder(order);
         } else {
-            sellSide.addOrder(order);
+            sellSide.addRestingOrder(order);
         }
+        orderIndex.put(order.getId(), new OrderLocator(order.getSide(), order.getPrice()));
     }
 
     /**
-     * @return {@code true} if both BUY and SELL sides are empty
+     * Cancel an order by id. Cancellation is idempotent and removes immediately.
+     *
+     * @param orderId the order id to cancel
+     * @return {@code true} if the order was removed
      */
-    public boolean isEmpty() {
-        return buySide.isEmpty() && sellSide.isEmpty();
+    public boolean cancelOrder(String orderId) {
+        Objects.requireNonNull(orderId, "orderId must not be null");
+        OrderLocator locator = orderIndex.get(orderId);
+        if (locator == null) {
+            return false;
+        }
+        OrderBookSide side = sideFor(locator.side());
+        boolean removed = side.cancelOrderById(orderId, locator);
+        orderIndex.remove(orderId);
+        return removed;
     }
 
     /**
-     * @return {@code true} if at least one resting BUY order exist
+     * Remove the best resting order if it is inactive.
+     *
+     * @param side the side to clean
+     * @return the removed order, or {@code null} if nothing was removed
      */
-    public boolean hasBuyResting() {
-        return !buySide.isEmpty();
-    }
+    public Order removeBestOrderIfInactive(OrderSide side) {
+        // find the correct side
+        OrderBookSide bookSide = sideFor(side);
+        
+        // attempt to remove the best order if inactive
+        Order removed = bookSide.removeBestOrderIfInactive();
 
-    /**
-     * @return {@code true} if at least one resting SELL order exist
-     */
-    public boolean hasSellResting() {
-        return !sellSide.isEmpty();
+        // if an order was removed, also remove it from the index
+        if (removed != null) {
+            orderIndex.remove(removed.getId());
+        }
+        
+        return removed;
     }
 
     /**
@@ -81,47 +105,21 @@ public class OrderBook {
         return buySide.bestPrice();
     }
 
-    /**
-     * Returns the current best ask price.
-     *
-     * @return lowest SELL price
-     * @throws IllegalStateException if no SELL orders exist
-     */
-    public long bestAsk() {
-        if (sellSide.isEmpty()) {
-            throw new IllegalStateException("No SELL orders in book");
-        }
-        return sellSide.bestPrice();
-    }
-
-    /**
-     * Returns whether the incoming order can execute immediately against
-     * the current best resting order on the opposite side.
-     *
-     * <p>This is a matching-time predicate (executability), not just "does liquidity exist".
-     *
-     * @param incoming the incoming order
-     * @return true if there is resting liquidity AND prices cross for this incoming order
-     */
-    public boolean canExecuteIncoming(Order incoming) {
-        if (incoming.getSide() == OrderSide.BUY) {
-            return !sellSide.isEmpty() && incoming.canMatch(sellSide.bestPrice());
-        } else {
-            return !buySide.isEmpty() && incoming.canMatch(buySide.bestPrice());
-        }
+    private OrderBookSide sideFor(OrderSide side) {
+        return (side == OrderSide.BUY) ? buySide : sellSide;
     }
 
     /**
      * @return the BUY side of the order book
      */
-    public BuyOrderBookSide buySide() {
+    public OrderBookSide buySide() {
         return buySide;
     }
 
     /**
      * @return the SELL side of the order book
      */
-    public SellOrderBookSide sellSide() {
+    public OrderBookSide sellSide() {
         return sellSide;
     }
 }

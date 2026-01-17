@@ -6,16 +6,19 @@ import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class TradeTest {
+// Unit tests for Trade record validation and field mapping.
+class TradeRecordTest {
 
     private static final Instant FIXED_TIME = Instant.parse("2026-01-01T00:00:00Z");
 
+    // Ensures null timestamps are rejected.
     @Test
     void constructor_rejectsNullTimestamp() {
         assertThrows(NullPointerException.class,
                 () -> new Trade("b", "s", 100, 1, null));
     }
 
+    // Ensures invalid order IDs are rejected.
     @Test
     void constructor_rejectsInvalidOrderIds() {
         assertThrows(IllegalArgumentException.class,
@@ -24,6 +27,7 @@ class TradeTest {
                 () -> new Trade("b", "   ", 100, 1, FIXED_TIME));
     }
 
+    // Ensures constructor assigns fields correctly.
     @Test
     void constructor_setsFields() {
         Trade trade = new Trade("b", "s", 100, 2, FIXED_TIME);

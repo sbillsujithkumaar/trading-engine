@@ -2,9 +2,7 @@ package tradingengine.book;
 
 import tradingengine.domain.Order;
 
-import java.util.ArrayDeque;
 import java.util.Comparator;
-import java.util.Deque;
 import java.util.NavigableMap;
 import java.util.NoSuchElementException;
 import java.util.Objects;
@@ -17,22 +15,20 @@ import java.util.TreeMap;
  *  - Maintain price priority using a sorted map
  *  - Maintain time priority (FIFO) within each price level
  *  - Support fast access to the "best" price level
+ *  - Support immediate cancellation by order id
  *
  * This class is agnostic to BUY vs SELL.
  * Price ordering is injected via a Comparator.
  */
 public class OrderBookSide {
-
     /**
-     * Mapping from price → FIFO queue of orders at that price.
+     * Mapping from price -> FIFO queue of orders at that price.
      *
      * TreeMap enforces price ordering:
      *  - BUY side: highest price first
      *  - SELL side: lowest price first
-     *
-     * Deque enforces FIFO ordering within the same price.
      */
-    private final NavigableMap<Long, Deque<Order>> priceLevels;
+    private final NavigableMap<Long, OrdersQueue> priceLevels;
 
     /**
      * Create an OrderBookSide with a given price ordering rule.
@@ -45,7 +41,7 @@ public class OrderBookSide {
     }
 
     /**
-     * @return true if this side has no resting orders
+     * @return true if this side has no resting orders (i.e. no prices)
      */
     public boolean isEmpty() {
         return priceLevels.isEmpty();
@@ -60,20 +56,18 @@ public class OrderBookSide {
     }
 
     /**
-     * Returns the oldest resting order at the best price level.
+     * Returns the oldest resting order at the best price level, or null if empty.
      *
-     * @return the best resting order
-     * @throws IllegalStateException if the book side is empty
+     * @return the best resting order, or {@code null} if the book is empty
      */
-    public Order peekBestOrder() {
-        // Defensive check
+    public Order peekBestOrderOrNull() {
         if (priceLevels.isEmpty()) {
-            throw new IllegalStateException("Cannot peek order from empty book side");
+            return null;
         }
 
         return priceLevels.firstEntry()
                 .getValue()
-                .peekFirst();
+                .peekOldest();
     }
 
     /**
@@ -85,40 +79,73 @@ public class OrderBookSide {
      *
      * @param order the order to add
      */
-    public void addOrder(Order order) {
+    public void addRestingOrder(Order order) {
         Objects.requireNonNull(order, "order must not be null");
 
         long price = order.getPrice();
-        Deque<Order> queue = priceLevels.get(price);
+        OrdersQueue queue = priceLevels.get(price);
         if (queue == null) {
-            queue = new ArrayDeque<>();
+            queue = new OrdersQueue();
             priceLevels.put(price, queue);
         }
 
-        queue.addLast(order);
+        queue.add(order);
     }
 
     /**
-     * Remove the head order at the best price level
-     * if it is no longer active - FILLED or CANCELLED.
-     * If the price level becomes empty, it is also removed entirely.
+     * Remove the head order at the best price level if it is inactive.
+     *
+     * @return the removed order, or {@code null} if nothing was removed
      */
-    public void removeHeadOrderIfInactive() {
+    public Order removeBestOrderIfInactive() {
         var bestPriceLevel = priceLevels.firstEntry();
         if (bestPriceLevel == null) {
-            return;
+            return null;
         }
 
-        Deque<Order> queue = bestPriceLevel.getValue();
-        Order head = queue.peekFirst();
- 
-        // Remove if inactive - FILLED or CANCELLED
+        OrdersQueue queue = bestPriceLevel.getValue();
+        Order head = queue.peekOldest();
+        if (head == null) {
+            return null;
+        }
+
         if (!head.isActive()) {
-            // Only the oldest order at the best price is eligible for removal (FIFO).
-            queue.pollFirst();
+            Order removed = queue.removeOldest();
             if (queue.isEmpty()) {
                 priceLevels.pollFirstEntry();
             }
+            return removed;
         }
+
+        return null;
+    }
+
+    /**
+     * Cancel a resting order by id using its locator.
+     *
+     * @param orderId the order id to cancel
+     * @param locator the side/price locator
+     * @return {@code true} if the order was removed
+     */
+    public boolean cancelOrderById(String orderId, OrderLocator locator) {
+        Objects.requireNonNull(orderId, "orderId must not be null");
+        Objects.requireNonNull(locator, "locator must not be null");
+
+        OrdersQueue queue = priceLevels.get(locator.price());
+        if (queue == null) {
+            return false;
+        }
+
+        Order removed = queue.removeById(orderId);
+        if (removed == null) {
+            return false;
+        }
+
+        removed.cancel();
+        if (queue.isEmpty()) {
+            priceLevels.remove(locator.price());
+        }
+
+        return true;
     }
 }

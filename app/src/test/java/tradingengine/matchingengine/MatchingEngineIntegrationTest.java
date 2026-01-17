@@ -15,7 +15,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class MatchingEngineTest {
+// Integration tests covering core matching behavior end-to-end.
+class MatchingEngineIntegrationTest {
 
     private static final Instant FIXED_INSTANT = Instant.parse("2026-01-01T00:00:00Z");
     private static final Clock FIXED_CLOCK = Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC);
@@ -24,6 +25,7 @@ class MatchingEngineTest {
         return new Order(side, price, quantity, Instant.now(FIXED_CLOCK));
     }
 
+    // Ensures exact quantity matches create a single trade and fill both orders.
     @Test
     void exactMatchProducesSingleTrade() {
         MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
@@ -44,6 +46,7 @@ class MatchingEngineTest {
         assertFalse(sell.isActive());
     }
 
+    // Ensures one incoming order can match multiple resting orders.
     @Test
     void incomingOrderMatchesMultipleRestingOrders() {
         MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
@@ -66,6 +69,7 @@ class MatchingEngineTest {
         assertEquals(OrderStatus.PARTIALLY_FILLED, s2.getStatus());
     }
 
+    // Ensures FIFO ordering is respected at the same price level.
     @Test
     void fifoIsRespectedAtSamePrice() {
         MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
@@ -83,6 +87,7 @@ class MatchingEngineTest {
         assertEquals(s1.getId(), trades.get(0).sellOrderId());
     }
 
+    // Ensures an empty opposite book produces no trades.
     @Test
     void emptyBookProducesNoTrades() {
         MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
@@ -94,6 +99,7 @@ class MatchingEngineTest {
         assertTrue(buy.isActive());
     }
 
+    // Ensures trades execute at the resting order price.
     @Test
     void tradeExecutesAtRestingPrice() {
         MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
@@ -109,6 +115,7 @@ class MatchingEngineTest {
         assertEquals(restingSell.getId(), trades.get(0).sellOrderId());
     }
 
+    // Ensures non-crossing prices do not trade.
     @Test
     void nonCrossingOrdersDoNotTrade() {
         MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
@@ -124,6 +131,7 @@ class MatchingEngineTest {
         assertTrue(sell.isActive());
     }
 
+    // Ensures incoming remainder rests and can match later.
     @Test
     void incomingRemainderIsRestedAndMatchesLater() {
         MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
@@ -147,6 +155,49 @@ class MatchingEngineTest {
         assertFalse(incomingSell.isActive());
     }
 
+    // Ensures identical sequences produce identical trade signatures.
+    @Test
+    void sameSequenceProducesSameTrades() {
+        MatchingEngine engine1 = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
+        MatchingEngine engine2 = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
+
+        List<Trade> t1 = new ArrayList<>();
+        t1.addAll(engine1.submit(order(OrderSide.BUY, 100, 10)));
+        t1.addAll(engine1.submit(order(OrderSide.SELL, 100, 10)));
+        t1.addAll(engine1.submit(order(OrderSide.SELL, 101, 5)));
+        t1.addAll(engine1.submit(order(OrderSide.BUY, 105, 5)));
+
+        List<Trade> t2 = new ArrayList<>();
+        t2.addAll(engine2.submit(order(OrderSide.BUY, 100, 10)));
+        t2.addAll(engine2.submit(order(OrderSide.SELL, 100, 10)));
+        t2.addAll(engine2.submit(order(OrderSide.SELL, 101, 5)));
+        t2.addAll(engine2.submit(order(OrderSide.BUY, 105, 5)));
+
+        assertEquals(tradeSignatures(t1), tradeSignatures(t2));
+    }
+
+    // Ensures determinism across repeated runs.
+    @Test
+    void repeatedRunsAreDeterministic() {
+        List<String> expected = null;
+
+        for (int i = 0; i < 50; i++) {
+            MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
+
+            List<Trade> trades = new ArrayList<>();
+            trades.addAll(engine.submit(order(OrderSide.BUY, 100, 10)));
+            trades.addAll(engine.submit(order(OrderSide.SELL, 100, 10)));
+
+            List<String> signature = tradeSignatures(trades);
+            if (expected == null) {
+                expected = signature;
+            } else {
+                assertEquals(expected, signature);
+            }
+        }
+    }
+
+    // Ensures best price levels are matched before worse prices.
     @Test
     void bestPriceLevelIsMatchedFirst() {
         MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
@@ -164,22 +215,27 @@ class MatchingEngineTest {
         assertEquals(bestAsk.getId(), trades.get(0).sellOrderId());
     }
 
+    // Ensures large incoming orders sweep multiple price levels in order.
     @Test
-    void deterministicExecutionProducesSameTradeValues() {
-        MatchingEngine engine1 = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
-        MatchingEngine engine2 = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
+    void largeIncomingOrderSweepsMultiplePriceLevels() {
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
 
-        Order b1 = order(OrderSide.BUY, 100, 10);
-        Order s1 = order(OrderSide.SELL, 100, 10);
-        engine1.submit(b1);
-        List<Trade> t1 = engine1.submit(s1);
+        Order s1 = order(OrderSide.SELL, 100, 5);
+        Order s2 = order(OrderSide.SELL, 101, 7);
+        engine.submit(s1);
+        engine.submit(s2);
 
-        Order b2 = order(OrderSide.BUY, 100, 10);
-        Order s2 = order(OrderSide.SELL, 100, 10);
-        engine2.submit(b2);
-        List<Trade> t2 = engine2.submit(s2);
+        Order buy = order(OrderSide.BUY, 105, 12);
+        List<Trade> trades = engine.submit(buy);
 
-        assertEquals(tradeSignatures(t1), tradeSignatures(t2));
+        assertEquals(2, trades.size());
+        assertEquals(5, trades.get(0).quantity());
+        assertEquals(100, trades.get(0).price());
+        assertEquals(7, trades.get(1).quantity());
+        assertEquals(101, trades.get(1).price());
+        assertFalse(buy.isActive());
+        assertFalse(s1.isActive());
+        assertFalse(s2.isActive());
     }
 
     private static List<String> tradeSignatures(List<Trade> trades) {

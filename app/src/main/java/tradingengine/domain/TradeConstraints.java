@@ -10,6 +10,7 @@ public final class TradeConstraints {
     }
 
     public static String requireValidOrderId(String id, String role) {
+        // Order ids can come from external systems -> reject blank values also as invalid.
         if (id == null || id.isBlank()) {
             throw new IllegalArgumentException(role + " order id must be present");
         }

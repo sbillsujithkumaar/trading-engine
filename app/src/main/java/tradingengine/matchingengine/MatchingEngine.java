@@ -1,6 +1,7 @@
 package tradingengine.matchingengine;
 
 import tradingengine.book.OrderBook;
+import tradingengine.book.OrderBookSide;
 import tradingengine.domain.Order;
 import tradingengine.domain.OrderSide;
 import tradingengine.domain.Trade;
@@ -36,6 +37,7 @@ import java.util.Objects;
  *   <li>BUY matches SELL when buyPrice ≥ sellPrice</li>
  *   <li>Execution occurs at the resting order's price</li>
  *   <li>FIFO ordering is enforced at each price level</li>
+ *   <li>Cancelled orders are removed immediately from the book</li>
  * </ul>
  */
 public class MatchingEngine {
@@ -102,55 +104,43 @@ public class MatchingEngine {
 
         return trades;
     }
-    
+
+    /**
+     * Cancel an order by id.
+     *
+     * @param orderId the order id to cancel
+     * @return {@code true} if the order was found
+     */
+    public boolean cancel(String orderId) {
+        return book.cancelOrder(orderId);
+    }
+
 
     /**
      * Attempts to match an incoming order against the opposite side of the book
      * until it is fully filled or no further execution is possible.
      */
     private void matchIncoming(Order incoming, List<Trade> trades) {
-        while (incoming.isActive() && book.canExecuteIncoming(incoming)) {
+        // Loop terminates when no match is possible (no resting order or prices do not cross).
+        while (incoming.isActive()) {
+            OrderBookSide oppositeSide = (incoming.getSide() == OrderSide.BUY)
+                    ? book.sellSide()
+                    : book.buySide();
 
-            Trade trade = (incoming.getSide() == OrderSide.BUY)
-                    ? matchIncomingBuy(incoming)
-                    : matchIncomingSell(incoming);
+            Order resting = oppositeSide.peekBestOrderOrNull();
+            if (resting == null) {
+                break;
+            }
+            if (!incoming.canMatch(resting.getPrice())) {
+                break;
+            }
 
+            Trade trade = executeTrade(incoming, resting);
             trades.add(trade);
+
+            OrderSide restingSide = (incoming.getSide() == OrderSide.BUY) ? OrderSide.SELL : OrderSide.BUY;
+            book.removeBestOrderIfInactive(restingSide);
         }
-    }
-
-    /**
-     * Matches an incoming BUY order against the best resting SELL order.
-     *
-     * @param incomingBuy the incoming BUY order
-     * @return the executed trade, or {@code null} if no match is possible
-     */
-    private Trade matchIncomingBuy(Order incomingBuy) {
-        Order restingSell = book.sellSide().peekBestOrder();
-
-        Trade trade = executeTrade(incomingBuy, restingSell);
-
-        // Remove completed resting order if necessary
-        book.sellSide().removeHeadOrderIfInactive();
-
-        return trade;
-    }
-
-    /**
-     * Matches an incoming SELL order against the best resting BUY order.
-     *
-     * @param incomingSell the incoming SELL order
-     * @return the executed trade, or {@code null} if no match is possible
-     */
-    private Trade matchIncomingSell(Order incomingSell) {
-        Order restingBuy = book.buySide().peekBestOrder();
-
-        Trade trade = executeTrade(incomingSell, restingBuy);
-
-        // Remove completed resting order if necessary
-        book.buySide().removeHeadOrderIfInactive();
-
-        return trade;
     }
 
     /**
