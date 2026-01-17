@@ -5,7 +5,12 @@ import tradingengine.book.OrderBook;
 import tradingengine.domain.Order;
 import tradingengine.domain.OrderSide;
 import tradingengine.domain.Trade;
+import tradingengine.events.EventDispatcher;
+import tradingengine.persistence.FileTradeStore;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -19,6 +24,14 @@ class MatchingEngineCancelIntegrationTest {
     private static final Instant FIXED_INSTANT = Instant.parse("2026-01-01T00:00:00Z");
     private static final Clock FIXED_CLOCK = Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC);
 
+    private static FileTradeStore tradeStore() {
+        try {
+            return new FileTradeStore(Files.createTempFile("trades", ".csv"));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     private static Order order(OrderSide side, long price, long quantity) {
         return new Order(side, price, quantity, Instant.now(FIXED_CLOCK));
     }
@@ -26,7 +39,7 @@ class MatchingEngineCancelIntegrationTest {
     // Ensures cancel before any match prevents trades.
     @Test
     void cancelBeforeMatchProducesNoTrades() {
-        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, new EventDispatcher(), tradeStore());
 
         Order buy = order(OrderSide.BUY, 100, 10);
         engine.submit(buy);
@@ -42,7 +55,7 @@ class MatchingEngineCancelIntegrationTest {
     // Ensures cancelling after a partial fill prevents further matches.
     @Test
     void cancelAfterPartialFillPreventsFurtherMatches() {
-        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, new EventDispatcher(), tradeStore());
 
         Order buy = order(OrderSide.BUY, 100, 10);
         engine.submit(buy);
@@ -64,7 +77,7 @@ class MatchingEngineCancelIntegrationTest {
     // Ensures repeated cancel calls are safe and do not throw.
     @Test
     void cancelIsIdempotent() {
-        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, new EventDispatcher(), tradeStore());
 
         Order buy = order(OrderSide.BUY, 100, 10);
         engine.submit(buy);

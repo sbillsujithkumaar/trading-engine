@@ -5,7 +5,12 @@ import tradingengine.book.OrderBook;
 import tradingengine.domain.Order;
 import tradingengine.domain.OrderSide;
 import tradingengine.domain.Trade;
+import tradingengine.events.EventDispatcher;
+import tradingengine.persistence.FileTradeStore;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -19,6 +24,14 @@ class MatchingEngineInvariantsTest {
     private static final Instant FIXED_INSTANT = Instant.parse("2026-01-01T00:00:00Z");
     private static final Clock FIXED_CLOCK = Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC);
 
+    private static FileTradeStore tradeStore() {
+        try {
+            return new FileTradeStore(Files.createTempFile("trades", ".csv"));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     private static Order order(OrderSide side, long price, long quantity) {
         return new Order(side, price, quantity, Instant.now(FIXED_CLOCK));
     }
@@ -26,7 +39,7 @@ class MatchingEngineInvariantsTest {
     // Ensures no trade is emitted with a non-positive quantity.
     @Test
     void noTradeHasNonPositiveQuantity() {
-        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, new EventDispatcher(), tradeStore());
 
         engine.submit(order(OrderSide.SELL, 100, 5));
         List<Trade> trades = engine.submit(order(OrderSide.BUY, 100, 5));
@@ -37,7 +50,7 @@ class MatchingEngineInvariantsTest {
     // Ensures order quantities never drop below zero after matching.
     @Test
     void remainingQuantityNeverNegative() {
-        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, new EventDispatcher(), tradeStore());
 
         Order sell = order(OrderSide.SELL, 100, 5);
         engine.submit(sell);
@@ -52,7 +65,7 @@ class MatchingEngineInvariantsTest {
     // Ensures total executed quantity never exceeds submitted quantity.
     @Test
     void totalExecutedNeverExceedsSubmitted() {
-        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK);
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, new EventDispatcher(), tradeStore());
 
         long submittedQty = 0;
         long executedQty = 0;

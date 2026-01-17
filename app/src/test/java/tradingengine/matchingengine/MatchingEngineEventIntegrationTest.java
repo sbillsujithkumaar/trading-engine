@@ -11,7 +11,11 @@ import tradingengine.events.OrderBookEvent;
 import tradingengine.events.OrderBookEventType;
 import tradingengine.events.TradeExecutedEvent;
 import tradingengine.events.listeners.CapturingEventListener;
+import tradingengine.persistence.FileTradeStore;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -26,6 +30,14 @@ class MatchingEngineEventIntegrationTest {
     private static final Instant FIXED_INSTANT = Instant.parse("2026-01-01T00:00:00Z");
     private static final Clock FIXED_CLOCK = Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC);
 
+    private static FileTradeStore tradeStore() {
+        try {
+            return new FileTradeStore(Files.createTempFile("trades", ".csv"));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     private static Order order(OrderSide side, long price, long quantity) {
         return new Order(side, price, quantity, Instant.now(FIXED_CLOCK));
     }
@@ -37,7 +49,7 @@ class MatchingEngineEventIntegrationTest {
         CapturingEventListener<TradeExecutedEvent> tradeListener = new CapturingEventListener<>();
         dispatcher.register(TradeExecutedEvent.class, tradeListener);
 
-        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, dispatcher);
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, dispatcher, tradeStore());
 
         engine.submit(order(OrderSide.SELL, 100, 5));
         engine.submit(order(OrderSide.SELL, 100, 5));
@@ -58,7 +70,7 @@ class MatchingEngineEventIntegrationTest {
         CapturingEventListener<OrderBookEvent> bookListener = new CapturingEventListener<>();
         dispatcher.register(OrderBookEvent.class, bookListener);
 
-        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, dispatcher);
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, dispatcher, tradeStore());
 
         Order buy = order(OrderSide.BUY, 100, 10);
         engine.submit(buy);
@@ -83,7 +95,7 @@ class MatchingEngineEventIntegrationTest {
         CapturingEventListener<OrderBookEvent> bookListener = new CapturingEventListener<>();
         dispatcher.register(OrderBookEvent.class, bookListener);
 
-        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, dispatcher);
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, dispatcher, tradeStore());
 
         Order buy = order(OrderSide.BUY, 101, 5);
         engine.submit(buy);
@@ -104,7 +116,7 @@ class MatchingEngineEventIntegrationTest {
         CapturingEventListener<OrderBookEvent> bookListener = new CapturingEventListener<>();
         dispatcher.register(OrderBookEvent.class, bookListener);
 
-        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, dispatcher);
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, dispatcher, tradeStore());
 
         engine.submit(order(OrderSide.SELL, 100, 4));
         engine.submit(order(OrderSide.BUY, 100, 4));
@@ -126,7 +138,7 @@ class MatchingEngineEventIntegrationTest {
         CapturingEventListener<EngineEvent> allListener = new CapturingEventListener<>();
         dispatcher.register(EngineEvent.class, allListener);
 
-        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, dispatcher);
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, dispatcher, tradeStore());
 
         engine.submit(order(OrderSide.SELL, 100, 5));
         engine.submit(order(OrderSide.BUY, 100, 5));
@@ -145,7 +157,7 @@ class MatchingEngineEventIntegrationTest {
         CapturingEventListener<TradeExecutedEvent> tradeListener = new CapturingEventListener<>();
         dispatcher.register(TradeExecutedEvent.class, tradeListener);
 
-        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, dispatcher);
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, dispatcher, tradeStore());
 
         engine.submit(order(OrderSide.BUY, 99, 5));
         engine.submit(order(OrderSide.SELL, 105, 5));

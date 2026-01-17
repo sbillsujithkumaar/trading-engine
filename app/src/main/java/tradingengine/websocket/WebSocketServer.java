@@ -12,6 +12,12 @@ public final class WebSocketServer {
     private WebSocketServer() {
     }
 
+    /** Starts the WebSocket server.
+     * @param broadcaster the market data broadcaster
+     * @param port the port to listen on
+     * @return the started Jetty server
+     * @throws Exception if server fails to start
+     */ 
     public static Server start(MarketDataBroadcaster broadcaster, int port) throws Exception {
         Server server = new Server(port);
         ServletContextHandler context = new ServletContextHandler(server, "/");

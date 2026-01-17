@@ -10,6 +10,7 @@ import tradingengine.events.EventDispatcher;
 import tradingengine.events.OrderBookEvent;
 import tradingengine.events.OrderBookEventType;
 import tradingengine.events.TradeExecutedEvent;
+import tradingengine.persistence.FileTradeStore;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -52,44 +53,21 @@ public class MatchingEngine {
     private final OrderBook book;
     private final Clock clock;
     private final EventDispatcher dispatcher;
+    private final FileTradeStore tradeStore;
 
     /**
-     * Creates a matching engine with a fresh, empty order book
-     */
-    public MatchingEngine() {
-        this(new OrderBook(), Clock.systemUTC(), new EventDispatcher());
-    }
-
-    /**
-     * Creates a matching engine with an existing order book
-     *
-     * @param book the order book instance
-     */
-    public MatchingEngine(OrderBook book) {
-        this(book, Clock.systemUTC(), new EventDispatcher());
-    }
-
-    /**
-     * Creates a matching engine with an existing order book and clock
-     *
-     * @param book the order book instance
-     * @param clock the time source for trade timestamps
-     */
-    public MatchingEngine(OrderBook book, Clock clock) {
-        this(book, clock, new EventDispatcher());
-    }
-
-    /**
-     * Creates a matching engine with an existing order book, clock, and dispatcher.
+     * Creates a matching engine with an existing order book, clock, dispatcher, and trade store.
      *
      * @param book the order book instance
      * @param clock the time source for trade timestamps
      * @param dispatcher the event dispatcher
+     * @param tradeStore the trade persistence store
      */
-    public MatchingEngine(OrderBook book, Clock clock, EventDispatcher dispatcher) {
+    public MatchingEngine(OrderBook book, Clock clock, EventDispatcher dispatcher, FileTradeStore tradeStore) {
         this.book = Objects.requireNonNull(book, "order book must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher must not be null");
+        this.tradeStore = Objects.requireNonNull(tradeStore, "tradeStore must not be null");
     }
 
     /**
@@ -227,13 +205,22 @@ public class MatchingEngine {
         buy.execute(fillQty);
         sell.execute(fillQty);
 
-        // Create and return the Trade record
-        return new Trade(
+        // Create and persist the Trade record
+        Trade trade = new Trade(
                 buy.getId(),
                 sell.getId(),
                 resting.getPrice(),
                 fillQty,
                 Instant.now(clock)
         );
+        tradeStore.save(trade);
+        return trade;
+    }
+
+    /**
+     * @return a read-only view of all trades in execution order.
+     */
+    public List<Trade> tradeHistory() {
+        return tradeStore.findAll();
     }
 }

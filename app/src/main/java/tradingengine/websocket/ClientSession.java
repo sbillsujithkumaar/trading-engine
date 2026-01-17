@@ -16,6 +16,9 @@ public class ClientSession {
         this.session = Objects.requireNonNull(session, "session must not be null");
     }
 
+    /** Sends a message to the client.
+     * @param message the message to send
+     */
     public void send(String message) {
         if (!session.isOpen()) {
             return;
