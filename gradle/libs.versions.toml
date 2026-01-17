@@ -4,7 +4,14 @@
 [versions]
 guava = "33.4.6-jre"
 junit-jupiter = "5.12.1"
+jackson = "2.17.0"
+jetty = "11.0.15"
 
 [libraries]
 guava = { module = "com.google.guava:guava", version.ref = "guava" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter" }
+jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
+jackson-jsr310 = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310", version.ref = "jackson" }
+jetty-server = { module = "org.eclipse.jetty:jetty-server", version.ref = "jetty" }
+jetty-servlet = { module = "org.eclipse.jetty:jetty-servlet", version.ref = "jetty" }
+jetty-websocket = { module = "org.eclipse.jetty.websocket:websocket-jetty-server", version.ref = "jetty" }

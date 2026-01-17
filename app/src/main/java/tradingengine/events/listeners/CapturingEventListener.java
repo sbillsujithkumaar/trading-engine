@@ -13,6 +13,11 @@ public final class CapturingEventListener<E extends EngineEvent> implements Even
 
     private final List<E> events = new ArrayList<>();
 
+    /**
+     * Handle an event published by the engine.
+     *
+     * @param event the event instance
+     */
     @Override
     public void onEvent(E event) {
         events.add(event);

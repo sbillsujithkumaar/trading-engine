@@ -5,6 +5,7 @@ import tradingengine.book.OrderBook;
 import tradingengine.domain.Order;
 import tradingengine.domain.OrderSide;
 import tradingengine.domain.Trade;
+import tradingengine.events.EngineEvent;
 import tradingengine.events.EventDispatcher;
 import tradingengine.events.OrderBookEvent;
 import tradingengine.events.OrderBookEventType;
@@ -19,6 +20,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 // Integration tests that validate event emission and ordering.
+@SuppressWarnings("null")
 class MatchingEngineEventIntegrationTest {
 
     private static final Instant FIXED_INSTANT = Instant.parse("2026-01-01T00:00:00Z");
@@ -72,5 +74,82 @@ class MatchingEngineEventIntegrationTest {
         assertEquals(OrderSide.BUY, cancelEvent.side());
         assertEquals(100, cancelEvent.price());
         assertEquals(FIXED_INSTANT, cancelEvent.timestamp());
+    }
+
+    // Ensures adding a resting order emits a book add event.
+    @Test
+    void addEventEmittedWhenOrderRests() {
+        EventDispatcher dispatcher = new EventDispatcher();
+        CapturingEventListener<OrderBookEvent> bookListener = new CapturingEventListener<>();
+        dispatcher.register(OrderBookEvent.class, bookListener);
+
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, dispatcher);
+
+        Order buy = order(OrderSide.BUY, 101, 5);
+        engine.submit(buy);
+
+        List<OrderBookEvent> events = bookListener.events();
+        assertEquals(1, events.size());
+        OrderBookEvent addEvent = events.get(0);
+        assertEquals(OrderBookEventType.ADD, addEvent.type());
+        assertEquals(OrderSide.BUY, addEvent.side());
+        assertEquals(101, addEvent.price());
+        assertEquals(FIXED_INSTANT, addEvent.timestamp());
+    }
+
+    // Ensures a filled resting order emits a book remove event.
+    @Test
+    void removeEventEmittedOnFill() {
+        EventDispatcher dispatcher = new EventDispatcher();
+        CapturingEventListener<OrderBookEvent> bookListener = new CapturingEventListener<>();
+        dispatcher.register(OrderBookEvent.class, bookListener);
+
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, dispatcher);
+
+        engine.submit(order(OrderSide.SELL, 100, 4));
+        engine.submit(order(OrderSide.BUY, 100, 4));
+
+        OrderBookEvent removeEvent = bookListener.events().stream()
+                .filter(event -> event.type() == OrderBookEventType.REMOVE)
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(OrderSide.SELL, removeEvent.side());
+        assertEquals(100, removeEvent.price());
+        assertEquals(FIXED_INSTANT, removeEvent.timestamp());
+    }
+
+    // Ensures a wildcard listener receives all event types in order.
+    @Test
+    void wildcardListenerReceivesAllEventsInOrder() {
+        EventDispatcher dispatcher = new EventDispatcher();
+        CapturingEventListener<EngineEvent> allListener = new CapturingEventListener<>();
+        dispatcher.register(EngineEvent.class, allListener);
+
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, dispatcher);
+
+        engine.submit(order(OrderSide.SELL, 100, 5));
+        engine.submit(order(OrderSide.BUY, 100, 5));
+
+        List<EngineEvent> events = allListener.events();
+        assertEquals(3, events.size());
+        assertTrue(events.get(0) instanceof OrderBookEvent);
+        assertTrue(events.get(1) instanceof TradeExecutedEvent);
+        assertTrue(events.get(2) instanceof OrderBookEvent);
+    }
+
+    // Ensures no trade events are emitted when no match occurs.
+    @Test
+    void noTradeEventWhenNoMatchOccurs() {
+        EventDispatcher dispatcher = new EventDispatcher();
+        CapturingEventListener<TradeExecutedEvent> tradeListener = new CapturingEventListener<>();
+        dispatcher.register(TradeExecutedEvent.class, tradeListener);
+
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, dispatcher);
+
+        engine.submit(order(OrderSide.BUY, 99, 5));
+        engine.submit(order(OrderSide.SELL, 105, 5));
+
+        assertTrue(tradeListener.events().isEmpty());
     }
 }

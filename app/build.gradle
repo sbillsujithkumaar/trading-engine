@@ -24,6 +24,13 @@ dependencies {
 
     // This dependency is used by the application.
     implementation libs.guava
+
+    // WebSocket streaming + JSON serialization.
+    implementation libs.jackson.databind
+    implementation libs.jackson.jsr310
+    implementation libs.jetty.server
+    implementation libs.jetty.servlet
+    implementation libs.jetty.websocket
 }
 
 // Apply a specific Java toolchain to ease working on different environments.
