@@ -39,6 +39,27 @@ public class FileTradeStore {
         }
     }
 
+    /**
+     * Truncates the trade file so it can be rebuilt deterministically via replay.
+     */
+    public void clear() {
+        try {
+            Path parent = file.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            Files.writeString(
+                    file,
+                    "",
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to clear trades file: " + file, e);
+        }
+    }
+
     /** Appends a trade to the CSV file.
      * @param trade the trade to append
      */

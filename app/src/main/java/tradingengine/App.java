@@ -9,13 +9,13 @@ import tradingengine.events.OrderBookEvent;
 import tradingengine.events.TradeExecutedEvent;
 import tradingengine.matchingengine.MatchingEngine;
 import tradingengine.ops.EngineRuntime;
+import tradingengine.persistence.CommandLog;
 import tradingengine.persistence.FileTradeStore;
 import tradingengine.websocket.MarketDataBroadcaster;
 import tradingengine.websocket.WebSocketServer;
 
 import java.nio.file.Path;
 import java.time.Clock;
-import java.time.Instant;
 
 /**
  * Entry point that wires together:
@@ -34,26 +34,50 @@ public class App {
         dispatcher.register(TradeExecutedEvent.class, broadcaster::onTradeExecuted);
         dispatcher.register(OrderBookEvent.class, broadcaster::onOrderBookEvent);
 
-        // TradeStore persists executed trades to disk (existing behaviour).
+        CommandLog commandLog = new CommandLog(Path.of("data", "commands.log"));
         FileTradeStore tradeStore = new FileTradeStore(Path.of("data", "trades.csv"));
 
         // MatchingEngine holds the core order book + matching rules.
-        MatchingEngine engine = new MatchingEngine(new OrderBook(), Clock.systemUTC(), dispatcher, tradeStore);
+        MatchingEngine engine = new MatchingEngine(
+                new OrderBook(),
+                Clock.systemUTC(),
+                dispatcher,
+                tradeStore,
+                commandLog
+        );
+
+        // Rebuild trade history from the command log on every boot.
+        tradeStore.clear();
+        engine.setReplayMode(true);
+        try {
+            for (CommandLog.Record record : commandLog.readAll()) {
+                if (record.type == CommandLog.Type.ORDER) {
+                    Order replayOrder = new Order(
+                            record.orderId,
+                            OrderSide.valueOf(record.side),
+                            record.price,
+                            record.quantity,
+                            record.timestamp
+                    );
+                    engine.submit(replayOrder);
+                } else if (record.type == CommandLog.Type.CANCEL) {
+                    engine.cancel(record.cancelOrderId);
+                }
+            }
+        } finally {
+            engine.setReplayMode(false);
+        }
 
         // Shared runtime state read by ops endpoints and dev APIs.
         EngineRuntime runtime = new EngineRuntime(engine, broadcaster);
 
         Server server = WebSocketServer.start(runtime, 8080);
+        runtime.setReady(true);
 
         System.out.println("UI: http://localhost:8080/ui");
         System.out.println("Ops: /health /ready /metrics");
         System.out.println("APIs: POST /api/order, POST /api/cancel");
         System.out.println("WebSocket: ws://localhost:8080/ws");
-
-        // Small bootstrap demo so UI has something to show on first run.
-        Instant now = Instant.now();
-        engine.submit(new Order(OrderSide.SELL, 101, 5, now));
-        engine.submit(new Order(OrderSide.BUY, 101, 5, now.plusMillis(1)));
 
         server.join();
     }

@@ -6,7 +6,7 @@ import java.util.UUID;
 
 public class Order {
     // Immutable order fields
-    private final String id = UUID.randomUUID().toString();
+    private final String id;
     private final OrderSide side;
     private final long price;
     private final Instant timestamp;
@@ -16,6 +16,14 @@ public class Order {
     private OrderStatus status = OrderStatus.NEW;
 
     public Order(OrderSide side, long price, long quantity, Instant timestamp) {
+        this(UUID.randomUUID().toString(), side, price, quantity, timestamp);
+    }
+
+    /**
+     * Used during recovery/replay so order IDs remain stable across restarts.
+     */
+    public Order(String id, OrderSide side, long price, long quantity, Instant timestamp) {
+        this.id = Objects.requireNonNull(id, "id must not be null");
         this.side = OrderConstraints.requireValidSide(side);
         this.price = OrderConstraints.requireValidPrice(price);
         this.remainingQty = OrderConstraints.requireValidQuantity(quantity);

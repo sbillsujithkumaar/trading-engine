@@ -48,7 +48,6 @@ public final class WebSocketServer {
         );
 
         server.start();
-        runtime.setReady(true);
         return server;
     }
 }

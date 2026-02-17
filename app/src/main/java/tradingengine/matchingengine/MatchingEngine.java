@@ -10,8 +10,10 @@ import tradingengine.events.EventDispatcher;
 import tradingengine.events.OrderBookEvent;
 import tradingengine.events.OrderBookEventType;
 import tradingengine.events.TradeExecutedEvent;
+import tradingengine.persistence.CommandLog;
 import tradingengine.persistence.FileTradeStore;
 
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -54,6 +56,8 @@ public class MatchingEngine {
     private final Clock clock;
     private final EventDispatcher dispatcher;
     private final FileTradeStore tradeStore;
+    private final CommandLog commandLog;
+    private boolean replayMode = false;
 
     /**
      * Creates a matching engine with an existing order book, clock, dispatcher, and trade store.
@@ -62,12 +66,43 @@ public class MatchingEngine {
      * @param clock the time source for trade timestamps
      * @param dispatcher the event dispatcher
      * @param tradeStore the trade persistence store
+     * @param commandLog append-only command log for crash recovery
      */
-    public MatchingEngine(OrderBook book, Clock clock, EventDispatcher dispatcher, FileTradeStore tradeStore) {
+    public MatchingEngine(
+            OrderBook book,
+            Clock clock,
+            EventDispatcher dispatcher,
+            FileTradeStore tradeStore,
+            CommandLog commandLog
+    ) {
         this.book = Objects.requireNonNull(book, "order book must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher must not be null");
         this.tradeStore = Objects.requireNonNull(tradeStore, "tradeStore must not be null");
+        this.commandLog = Objects.requireNonNull(commandLog, "commandLog must not be null");
+    }
+
+    /**
+     * Backward-compatible constructor that uses an ephemeral command log path.
+     */
+    public MatchingEngine(OrderBook book, Clock clock, EventDispatcher dispatcher, FileTradeStore tradeStore) {
+        this(
+                book,
+                clock,
+                dispatcher,
+                tradeStore,
+                new CommandLog(Path.of(
+                        System.getProperty("java.io.tmpdir"),
+                        "tradingengine-commands-" + System.nanoTime() + ".log"
+                ))
+        );
+    }
+
+    /**
+     * Enables replay mode to suppress live event emission and command-log writes.
+     */
+    public void setReplayMode(boolean replayMode) {
+        this.replayMode = replayMode;
     }
 
     /**
@@ -88,6 +123,16 @@ public class MatchingEngine {
         // Validate input - incoming Order must not be null
         Objects.requireNonNull(incoming, "incoming order must not be null");
 
+        if (!replayMode) {
+            commandLog.appendOrder(
+                    incoming.getId(),
+                    incoming.getSide().name(),
+                    incoming.getPrice(),
+                    incoming.getRemainingQty(),
+                    incoming.getTimestamp()
+            );
+        }
+
         // List to accumulate resulting trades
         List<Trade> trades = new ArrayList<>();
 
@@ -98,12 +143,14 @@ public class MatchingEngine {
         // If incoming order is still active (not fully filled), add to order book
         if (incoming.isActive()) {
             book.addOrder(incoming);
-            dispatcher.publish(new OrderBookEvent(
-                    incoming.getSide(),
-                    incoming.getPrice(),
-                    OrderBookEventType.ADD,
-                    Instant.now(clock)
-            ));
+            if (!replayMode) {
+                dispatcher.publish(new OrderBookEvent(
+                        incoming.getSide(),
+                        incoming.getPrice(),
+                        OrderBookEventType.ADD,
+                        Instant.now(clock)
+                ));
+            }
         }
 
         return trades;
@@ -122,12 +169,15 @@ public class MatchingEngine {
             return false;
         }
         OrderLocator cancelled = locator.get();
-        dispatcher.publish(new OrderBookEvent(
-                cancelled.side(),
-                cancelled.price(),
-                OrderBookEventType.CANCEL,
-                Instant.now(clock)
-        ));
+        if (!replayMode) {
+            dispatcher.publish(new OrderBookEvent(
+                    cancelled.side(),
+                    cancelled.price(),
+                    OrderBookEventType.CANCEL,
+                    Instant.now(clock)
+            ));
+            commandLog.appendCancel(orderId, Instant.now(clock));
+        }
         return true;
     }
 
@@ -153,17 +203,21 @@ public class MatchingEngine {
 
             Trade trade = executeTrade(incoming, resting);
             trades.add(trade);
-            dispatcher.publish(new TradeExecutedEvent(trade, trade.timestamp()));
+            if (!replayMode) {
+                dispatcher.publish(new TradeExecutedEvent(trade, trade.timestamp()));
+            }
 
             OrderSide restingSide = (incoming.getSide() == OrderSide.BUY) ? OrderSide.SELL : OrderSide.BUY;
             Order removed = book.removeBestOrderIfInactive(restingSide);
             if (removed != null) {
-                dispatcher.publish(new OrderBookEvent(
-                        removed.getSide(),
-                        removed.getPrice(),
-                        OrderBookEventType.REMOVE,
-                        Instant.now(clock)
-                ));
+                if (!replayMode) {
+                    dispatcher.publish(new OrderBookEvent(
+                            removed.getSide(),
+                            removed.getPrice(),
+                            OrderBookEventType.REMOVE,
+                            Instant.now(clock)
+                    ));
+                }
             }
         }
     }
