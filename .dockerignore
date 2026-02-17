@@ -1,0 +1,11 @@
+**/build/
+**/.gradle/
+**/.idea/
+**/.vscode/
+**/*.iml
+data/
+.git
+docker-data/
+*.log
+*.tmp
+.DS_Store

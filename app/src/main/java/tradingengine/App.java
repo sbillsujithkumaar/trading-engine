@@ -34,8 +34,12 @@ public class App {
         dispatcher.register(TradeExecutedEvent.class, broadcaster::onTradeExecuted);
         dispatcher.register(OrderBookEvent.class, broadcaster::onOrderBookEvent);
 
-        CommandLog commandLog = new CommandLog(Path.of("data", "commands.log"));
-        FileTradeStore tradeStore = new FileTradeStore(Path.of("data", "trades.csv"));
+        String dataDir = System.getenv().getOrDefault("DATA_DIR", "data");
+        Path commandsPath = Path.of(dataDir, "commands.log");
+        Path tradesPath = Path.of(dataDir, "trades.csv");
+
+        CommandLog commandLog = new CommandLog(commandsPath);
+        FileTradeStore tradeStore = new FileTradeStore(tradesPath);
 
         // MatchingEngine holds the core order book + matching rules.
         MatchingEngine engine = new MatchingEngine(
