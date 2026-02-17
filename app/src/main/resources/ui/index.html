@@ -1,0 +1,147 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Trading Engine</title>
+</head>
+
+<body style="font-family: monospace; margin: 24px;">
+
+<!-- 
+  Minimal operational dashboard.
+
+  Purpose:
+  - Quickly verify engine is running
+  - Observe basic metrics
+  - Send test orders
+  - View live WebSocket stream
+-->
+
+<h2>Trading Engine (Local Demo)</h2>
+
+<p>
+  Health: <span id="health">...</span><br/>
+  Ready: <span id="ready">...</span><br/>
+  Clients: <span id="clients">...</span><br/>
+  Orders: <span id="orders">...</span><br/>
+  Cancels: <span id="cancels">...</span><br/>
+  Trades: <span id="trades">...</span><br/>
+  Rejects: <span id="rejects">...</span>
+</p>
+
+<hr/>
+
+<h3>Send Test Orders</h3>
+
+<!--
+  These buttons call the HTTP API directly.
+  I use them for quick manual testing without needing Postman.
+-->
+
+<button onclick="sendOrder('BUY', 101, 5)">BUY 5 @ 101</button>
+<button onclick="sendOrder('SELL', 101, 5)">SELL 5 @ 101</button>
+<button onclick="sendOrder('BUY', 99, 3)">BUY 3 @ 99</button>
+<button onclick="sendOrder('SELL', 99, 3)">SELL 3 @ 99</button>
+
+<p id="result"></p>
+
+<hr/>
+
+<h3>Live Feed (WebSocket)</h3>
+
+<!--
+  Displays raw WebSocket messages from the engine.
+  Keeping it as plain text makes debugging easier.
+-->
+<pre id="feed" style="border:1px solid #ccc; padding:10px; height:250px; overflow:auto;"></pre>
+
+<script>
+
+  // WebSocket endpoint is separated from HTTP routes.
+  // This keeps UI routes clean and avoids protocol conflicts.
+  const wsUrl = "ws://" + location.host + "/ws";
+
+  const feed = document.getElementById('feed');
+
+  // Appends new messages to the feed window.
+  function append(line) {
+    feed.textContent += line + "\n";
+    feed.scrollTop = feed.scrollHeight;
+  }
+
+  // Poll operational endpoints every few seconds.
+  // This simulates basic monitoring.
+  async function poll() {
+    try {
+      const health = await fetch('/health');
+      document.getElementById('health').textContent = await health.text();
+
+      const ready = await fetch('/ready');
+      document.getElementById('ready').textContent = await ready.text();
+
+      const metrics = await fetch('/metrics');
+      const lines = (await metrics.text()).trim().split(/\n+/);
+
+      // Parse simple "key value" metrics format.
+      const map = {};
+      for (const ln of lines) {
+        const parts = ln.split(/\s+/);
+        if (parts.length >= 2) {
+          map[parts[0]] = parts[1];
+        }
+      }
+
+      document.getElementById('clients').textContent = map.connected_clients ?? '?';
+      document.getElementById('orders').textContent = map.orders_received ?? '?';
+      document.getElementById('cancels').textContent = map.cancels_received ?? '?';
+      document.getElementById('trades').textContent = map.trades_executed ?? '?';
+      document.getElementById('rejects').textContent = map.rejects ?? '?';
+
+    } catch (e) {
+      // If polling fails, assume service is down.
+      document.getElementById('health').textContent = "down";
+      document.getElementById('ready').textContent = "down";
+    }
+  }
+
+  // Sends a JSON order to the HTTP API.
+  async function sendOrder(side, price, quantity) {
+    const res = await fetch('/api/order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ side, price, quantity })
+    });
+
+    const body = await res.json();
+
+    document.getElementById('result').textContent =
+      res.ok
+        ? "Accepted orderId=" + body.orderId + ", trades=" + body.trades
+        : "Rejected: " + body.error;
+
+    // Refresh metrics after each order submission.
+    poll();
+  }
+
+  // Establish persistent WebSocket connection.
+  function connectWS() {
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => append("[ws] connected");
+    ws.onmessage = (ev) => append(ev.data);
+
+    ws.onclose = () => {
+      append("[ws] disconnected. retrying...");
+      setTimeout(connectWS, 1000);
+    };
+  }
+
+  // Initial setup.
+  poll();
+  setInterval(poll, 2000);
+  connectWS();
+
+</script>
+
+</body>
+</html>

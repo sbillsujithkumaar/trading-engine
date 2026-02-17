@@ -8,40 +8,53 @@ import tradingengine.events.EventDispatcher;
 import tradingengine.events.OrderBookEvent;
 import tradingengine.events.TradeExecutedEvent;
 import tradingengine.matchingengine.MatchingEngine;
+import tradingengine.ops.EngineRuntime;
 import tradingengine.persistence.FileTradeStore;
 import tradingengine.websocket.MarketDataBroadcaster;
 import tradingengine.websocket.WebSocketServer;
 
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
-import java.nio.file.Path;
 
+/**
+ * Entry point that wires together:
+ * - core engine
+ * - event listeners
+ * - persistence
+ * - server interfaces
+ */
 public class App {
 
     public static void main(String[] args) throws Exception {
-        // Set up event dispatcher and broadcaster
         EventDispatcher dispatcher = new EventDispatcher();
-        MarketDataBroadcaster broadcaster = new MarketDataBroadcaster();
 
-        // Register event handlers
+        // Turns engine events into messages for connected WS clients.
+        MarketDataBroadcaster broadcaster = new MarketDataBroadcaster();
         dispatcher.register(TradeExecutedEvent.class, broadcaster::onTradeExecuted);
         dispatcher.register(OrderBookEvent.class, broadcaster::onOrderBookEvent);
 
-        // Initialize trade store and matching engine
+        // TradeStore persists executed trades to disk (existing behaviour).
         FileTradeStore tradeStore = new FileTradeStore(Path.of("data", "trades.csv"));
+
+        // MatchingEngine holds the core order book + matching rules.
         MatchingEngine engine = new MatchingEngine(new OrderBook(), Clock.systemUTC(), dispatcher, tradeStore);
-        
-        // Start WebSocket server
-        Server server = WebSocketServer.start(broadcaster, 8080);
 
-        System.out.println("WebSocket server running on ws://localhost:8080");
+        // Shared runtime state read by ops endpoints and dev APIs.
+        EngineRuntime runtime = new EngineRuntime(engine, broadcaster);
 
-        // Example order submissions to demonstrate functionality
+        Server server = WebSocketServer.start(runtime, 8080);
+
+        System.out.println("UI: http://localhost:8080/ui");
+        System.out.println("Ops: /health /ready /metrics");
+        System.out.println("APIs: POST /api/order, POST /api/cancel");
+        System.out.println("WebSocket: ws://localhost:8080/ws");
+
+        // Small bootstrap demo so UI has something to show on first run.
         Instant now = Instant.now();
         engine.submit(new Order(OrderSide.SELL, 101, 5, now));
         engine.submit(new Order(OrderSide.BUY, 101, 5, now.plusMillis(1)));
 
-        // Keep the server running
         server.join();
     }
 }

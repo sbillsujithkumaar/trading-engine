@@ -80,4 +80,12 @@ public class MarketDataBroadcaster {
             client.send(json);
         }
     }
+
+    /**
+     * Used by /metrics to expose how many WS clients are connected.
+     * Kept here so ops code doesn't need to touch the internal clients set directly.
+     */
+    public int connectedClients() {
+        return clients.size();
+    }
 }

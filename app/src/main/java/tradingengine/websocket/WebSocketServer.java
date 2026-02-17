@@ -2,33 +2,51 @@ package tradingengine.websocket;
 
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletContextHandler;
+import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.websocket.server.config.JettyWebSocketServletContainerInitializer;
+import tradingengine.ops.*;
 
 /**
- * Starts a Jetty WebSocket server for market data streaming.
+ * Single place that exposes all service endpoints.
+ *
+ * I separate interfaces by path:
+ * - UI pages live on HTTP routes (/ui)
+ * - ops endpoints live on HTTP routes (/health, /metrics)
+ * - WebSocket streaming lives on /ws
+ *
+ * This makes it easy to demo and keeps protocol routes stable.
  */
 public final class WebSocketServer {
 
-    private WebSocketServer() {
-    }
+    private WebSocketServer() {}
 
-    /** Starts the WebSocket server.
-     * @param broadcaster the market data broadcaster
-     * @param port the port to listen on
-     * @return the started Jetty server
-     * @throws Exception if server fails to start
-     */ 
-    public static Server start(MarketDataBroadcaster broadcaster, int port) throws Exception {
+    public static Server start(EngineRuntime runtime, int port) throws Exception {
         Server server = new Server(port);
         ServletContextHandler context = new ServletContextHandler(server, "/");
 
+        // UI routes
+        context.addServlet(RootRedirectServlet.class, "/");
+        context.addServlet(UiServlet.class, "/ui");
+
+        // Ops routes
+        context.addServlet(HealthServlet.class, "/health");
+        context.addServlet(new ServletHolder(new ReadyServlet(runtime)), "/ready");
+        context.addServlet(new ServletHolder(new MetricsServlet(runtime)), "/metrics");
+
+        // Dev APIs (need runtime, so instantiated manually)
+        context.addServlet(new ServletHolder(new OrderApiServlet(runtime)), "/api/order");
+        context.addServlet(new ServletHolder(new CancelApiServlet(runtime)), "/api/cancel");
+
+
+        // WebSocket streaming endpoint
         JettyWebSocketServletContainerInitializer.configure(
                 context,
                 (servletContext, container) ->
-                        container.addMapping("/", (req, resp) -> new EngineWebSocket(broadcaster))
+                        container.addMapping("/ws", (req, resp) -> new EngineWebSocket(runtime.broadcaster()))
         );
 
         server.start();
+        runtime.setReady(true);
         return server;
     }
 }
