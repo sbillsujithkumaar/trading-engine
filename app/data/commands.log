@@ -1,5 +1,2 @@
-{"type":"ORDER","orderId":"c3bc5052-3656-45fc-bc8d-0418779d9369","side":"BUY","price":100,"quantity":10,"timestamp":"2026-02-17T16:06:11.940455600Z","cancelOrderId":null}
-{"type":"ORDER","orderId":"d5a87017-f490-42e5-bd9a-36a845b6d8bf","side":"BUY","price":99,"quantity":5,"timestamp":"2026-02-17T16:06:19.550552500Z","cancelOrderId":null}
-{"type":"ORDER","orderId":"744893f7-0506-458c-b70c-f5d66784d969","side":"SELL","price":100,"quantity":3,"timestamp":"2026-02-17T16:06:33.141175100Z","cancelOrderId":null}
-{"type":"ORDER","orderId":"da2eb72b-321a-49f9-9b7c-1edfb9173d7d","side":"SELL","price":100,"quantity":7,"timestamp":"2026-02-17T16:06:43.917800700Z","cancelOrderId":null}
-{"type":"CANCEL","orderId":null,"side":null,"price":0,"quantity":0,"timestamp":"2026-02-17T16:08:51.846706Z","cancelOrderId":"d5a87017-f490-42e5-bd9a-36a845b6d8bf"}
+{"type":"ORDER","orderId":"83cb4802-8770-4593-8510-c3c3b360fb76","side":"BUY","price":101,"quantity":5,"timestamp":"2026-02-17T17:11:34.928596200Z","cancelOrderId":null,"prevHash":"GENESIS","hash":"ee73fc912c8c541eb1fa7d64d33a4551c34ca73c8433c08a33dd1d5068251d4a"}
+{"type":"ORDER","orderId":"22373a9b-7de9-4bb9-913f-33d361f740ca","side":"BUY","price":104,"quantity":8,"timestamp":"2026-02-17T17:11:45.528675500Z","cancelOrderId":null,"prevHash":"ee73fc912c8c541eb1fa7d64d33a4551c34ca73c8433c08a33dd1d5068251d4a","hash":"ecb3aad7e6d2ee6fe155ff729ad7d581c8728abecd92fc5978e4d3babd7e0272"}

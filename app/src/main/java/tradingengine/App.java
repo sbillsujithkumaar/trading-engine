@@ -46,6 +46,9 @@ public class App {
                 commandLog
         );
 
+        // Verify command log integrity before replaying any state.
+        commandLog.verifyChainOrThrow();
+
         // Rebuild trade history from the command log on every boot.
         tradeStore.clear();
         engine.setReplayMode(true);
