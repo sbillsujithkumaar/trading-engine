@@ -2,7 +2,9 @@ package tradingengine.book;
 
 import tradingengine.domain.Order;
 
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.NavigableMap;
 import java.util.NoSuchElementException;
 import java.util.Objects;
@@ -21,6 +23,24 @@ import java.util.TreeMap;
  * Price ordering is injected via a Comparator.
  */
 public class OrderBookSide {
+    /**
+     * One resting order snapshot inside a price level.
+     *
+     * @param orderId order identifier
+     * @param qty remaining quantity for this order
+     */
+    public record RestingOrderSnapshot(String orderId, long qty) {}
+
+    /**
+     * Aggregated snapshot row for one price level.
+     *
+     * @param price  the price level
+     * @param qty    total resting quantity at this price
+     * @param count  number of resting orders at this price
+     * @param orders resting orders at this level in FIFO order
+     */
+    public record LevelSnapshot(long price, long qty, int count, List<RestingOrderSnapshot> orders) {}
+
     /**
      * Mapping from price -> FIFO queue of orders at that price.
      *
@@ -179,5 +199,36 @@ public class OrderBookSide {
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Returns an aggregated, immutable snapshot in current price-priority order.
+     * Used by HTTP snapshot APIs.
+     */
+    public List<LevelSnapshot> snapshotLevels() {
+        List<LevelSnapshot> levels = new ArrayList<>(priceLevels.size());
+        for (var entry : priceLevels.entrySet()) {
+            long price = entry.getKey();
+            OrdersQueue queue = entry.getValue();
+            long qty = 0L;
+            int count = 0;
+            List<RestingOrderSnapshot> orders = new ArrayList<>();
+            for (Order order : queue.snapshotFifo()) {
+                if (!order.isActive()) {
+                    continue;
+                }
+                long remaining = order.getRemainingQty();
+                if (remaining <= 0) {
+                    continue;
+                }
+                qty += remaining;
+                count++;
+                orders.add(new RestingOrderSnapshot(order.getId(), remaining));
+            }
+            if (count > 0) {
+                levels.add(new LevelSnapshot(price, qty, count, List.copyOf(orders)));
+            }
+        }
+        return List.copyOf(levels);
     }
 }

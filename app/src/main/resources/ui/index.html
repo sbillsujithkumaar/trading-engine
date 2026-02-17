@@ -1,131 +1,186 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <title>Trading Engine</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trading Engine UI</title>
+  <link rel="stylesheet" href="/ui/styles.css" />
 </head>
+<body>
+  <div class="wrap">
+    <h1>Trading Engine Dashboard</h1>
 
-<body style="font-family: monospace; margin: 24px;">
+    <section class="status">
+      <article class="card">
+        <div class="kv"><span class="k">Host</span><span class="v" id="hostVal">-</span></div>
+        <div class="kv"><span class="k">Last Refresh</span><span class="v" id="refreshVal">-</span></div>
+        <div class="kv"><span class="k">Last Push</span><span class="v" id="lastPushVal">-</span></div>
+        <div class="kv"><span class="k">WS Clients</span><span class="v" id="clientsVal">-</span></div>
+      </article>
 
-<!-- Minimal UI for correctness checks:
-     - submit arbitrary orders (side/price/qty)
-     - view full order book dump
-     - view recent trades
--->
+      <article class="card status-card">
+        <div class="status-title">WebSocket Push</div>
+        <div class="pill">
+          <span id="wsDot" class="dot warn"></span>
+          <span id="wsVal">Connecting</span>
+        </div>
+        <p class="status-help">
+          <code>Connected</code> means this browser is connected to <code>/ws</code>.
+          WebSocket is used as a push signal to trigger a fresh HTTP snapshot fetch.
+        </p>
+      </article>
 
-<h2>Trading Engine (Local Demo)</h2>
+      <article class="card status-card">
+        <div class="status-title">HTTP Health</div>
+        <div class="pill">
+          <span id="healthDot" class="dot warn"></span>
+          <span id="healthVal">Checking</span>
+        </div>
+        <p class="status-help">
+          <code>OK</code> comes from <code>/health</code>. It means the server process is reachable
+          over HTTP.
+        </p>
+      </article>
 
-<p>
-  Connected to: <span id="serverHost"></span><br/>
-  Server files: <code>./data/commands.log</code>, <code>./data/trades.csv</code> (on server)
-</p>
+      <article class="card status-card">
+        <div class="status-title">Engine Ready</div>
+        <div class="pill">
+          <span id="readyDot" class="dot warn"></span>
+          <span id="readyVal">Checking</span>
+        </div>
+        <p class="status-help">
+          <code>READY</code> comes from <code>/ready</code>. It means startup and replay are complete,
+          so snapshot APIs are ready to serve current state.
+        </p>
+      </article>
+    </section>
 
-<div>
-  Health: <span id="health">...</span> |
-  Ready: <span id="ready">...</span> |
-  Clients: <span id="clients">...</span>
-</div>
+    <section class="grid">
+      <article class="card">
+        <div class="section-title">
+          <h2>Submit Order</h2>
+        </div>
 
-<hr/>
+        <div class="row">
+          <div>
+            <label for="side">Side</label>
+            <select id="side">
+              <option value="BUY">BUY</option>
+              <option value="SELL">SELL</option>
+            </select>
+          </div>
+          <div>
+            <label for="price">Price</label>
+            <input id="price" type="number" min="1" step="1" value="101" />
+          </div>
+          <div>
+            <label for="qty">Quantity</label>
+            <input id="qty" type="number" min="1" step="1" value="5" />
+          </div>
+        </div>
 
-<h3>Submit Order</h3>
+        <div style="margin-top: 10px;">
+          <button id="submitBtn" type="button">Submit Order</button>
+        </div>
 
-<div>
-  Side:
-  <select id="side">
-    <option>BUY</option>
-    <option>SELL</option>
-  </select>
+        <div id="orderMsg" class="msg"></div>
+      </article>
 
-  Price:
-  <input id="price" type="number" value="101" style="width:90px;"/>
+      <article class="card">
+        <div class="section-title">
+          <h2>Cancel Order</h2>
+        </div>
 
-  Qty:
-  <input id="qty" type="number" value="5" style="width:70px;"/>
+        <div>
+          <label for="cancelId">Order ID</label>
+          <input id="cancelId" type="text" placeholder="Paste order id" />
+        </div>
 
-  <button onclick="submitOrder()">Submit</button>
-</div>
+        <div style="margin-top: 10px;">
+          <button id="cancelBtn" type="button">Cancel Order</button>
+        </div>
 
-<p id="result"></p>
+        <div id="cancelMsg" class="msg"></div>
 
-<hr/>
+        <p class="hint">
+          Submit an order first, then reuse its order id here for cancellation tests.
+        </p>
+      </article>
+    </section>
 
-<h3>Order Book (Full Dump)</h3>
-<pre id="book" style="border:1px solid #ccc; padding:10px; height:260px; overflow:auto;"></pre>
+    <section class="split">
+      <article class="card">
+        <div class="section-title">
+          <h2>Bids</h2>
+        </div>
+        <table>
+          <thead>
+            <tr><th class="left">Price</th><th>Level Qty</th><th>FIFO Queue (Head -> Tail)</th></tr>
+          </thead>
+          <tbody id="bidsBody"></tbody>
+        </table>
+      </article>
 
-<h3>Recent Trades</h3>
-<pre id="trades" style="border:1px solid #ccc; padding:10px; height:180px; overflow:auto;"></pre>
+      <article class="card">
+        <div class="section-title">
+          <h2>Asks</h2>
+        </div>
+        <table>
+          <thead>
+            <tr><th class="left">Price</th><th>Level Qty</th><th>FIFO Queue (Head -> Tail)</th></tr>
+          </thead>
+          <tbody id="asksBody"></tbody>
+        </table>
+      </article>
+    </section>
 
-<h3>Live Feed (WebSocket)</h3>
-<pre id="feed" style="border:1px solid #ccc; padding:10px; height:180px; overflow:auto;"></pre>
+    <section class="card" style="margin-top: 12px;">
+      <div class="section-title">
+        <h2>Recent Trades</h2>
+        <span class="small">latest first</span>
+      </div>
+      <table>
+        <thead>
+          <tr><th class="left">Time</th><th>Price</th><th>Qty</th><th class="left">Info</th></tr>
+        </thead>
+        <tbody id="tradesBody"></tbody>
+      </table>
+    </section>
 
-<script>
-  const wsUrl = "ws://" + location.host + "/ws";
-  const feed = document.getElementById("feed");
-  document.getElementById("serverHost").textContent = location.host;
+    <p class="footer">Endpoints: /health, /ready, /metrics, /api/*, /ws</p>
+  </div>
 
-  function append(line) {
-    feed.textContent += line + "\n";
-    feed.scrollTop = feed.scrollHeight;
-  }
+  <script type="module">
+    import { boot } from "/ui/js/app.js";
 
-  async function pollStatus() {
-    try {
-      document.getElementById("health").textContent = (await (await fetch("/health")).text()).trim();
-      document.getElementById("ready").textContent  = (await (await fetch("/ready")).text()).trim();
+    const els = {
+      hostVal: document.getElementById("hostVal"),
+      wsDot: document.getElementById("wsDot"),
+      wsVal: document.getElementById("wsVal"),
+      lastPushVal: document.getElementById("lastPushVal"),
+      clientsVal: document.getElementById("clientsVal"),
+      healthDot: document.getElementById("healthDot"),
+      healthVal: document.getElementById("healthVal"),
+      readyDot: document.getElementById("readyDot"),
+      readyVal: document.getElementById("readyVal"),
+      refreshVal: document.getElementById("refreshVal"),
 
-      const metrics = (await (await fetch("/metrics")).text()).trim().split(/\n+/);
-      const map = {};
-      for (const ln of metrics) {
-        const parts = ln.split(/\s+/);
-        if (parts.length >= 2) map[parts[0]] = parts[1];
-      }
-      document.getElementById("clients").textContent = map.connected_clients ?? "?";
-    } catch (e) {
-      document.getElementById("health").textContent = "down";
-      document.getElementById("ready").textContent = "down";
-    }
-  }
+      side: document.getElementById("side"),
+      price: document.getElementById("price"),
+      qty: document.getElementById("qty"),
+      submitBtn: document.getElementById("submitBtn"),
+      orderMsg: document.getElementById("orderMsg"),
 
-  async function refreshBookAndTrades() {
-    document.getElementById("book").textContent = await (await fetch("/api/book")).text();
-    document.getElementById("trades").textContent = await (await fetch("/api/trades?limit=50")).text();
-  }
+      cancelId: document.getElementById("cancelId"),
+      cancelBtn: document.getElementById("cancelBtn"),
+      cancelMsg: document.getElementById("cancelMsg"),
 
-  async function submitOrder() {
-    const side = document.getElementById("side").value;
-    const price = parseInt(document.getElementById("price").value, 10);
-    const quantity = parseInt(document.getElementById("qty").value, 10);
+      bidsBody: document.getElementById("bidsBody"),
+      asksBody: document.getElementById("asksBody"),
+      tradesBody: document.getElementById("tradesBody"),
+    };
 
-    const res = await fetch("/api/order", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ side, price, quantity })
-    });
-
-    const body = await res.json();
-    document.getElementById("result").textContent =
-      res.ok ? ("Accepted orderId=" + body.orderId + " trades=" + body.trades)
-             : ("Rejected: " + body.error);
-
-    await refreshBookAndTrades();
-    await pollStatus();
-  }
-
-  function connectWS() {
-    const ws = new WebSocket(wsUrl);
-    ws.onopen = () => append("[ws] connected");
-    ws.onmessage = (ev) => append(ev.data);
-    ws.onclose = () => { append("[ws] disconnected. retrying..."); setTimeout(connectWS, 1000); };
-  }
-
-  pollStatus();
-  refreshBookAndTrades();
-  connectWS();
-
-  setInterval(pollStatus, 2000);
-  setInterval(refreshBookAndTrades, 2000);
-</script>
-
+    boot(els);
+  </script>
 </body>
 </html>

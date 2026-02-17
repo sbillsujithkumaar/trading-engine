@@ -27,6 +27,7 @@ public final class WebSocketServer {
         // UI routes
         context.addServlet(RootRedirectServlet.class, "/");
         context.addServlet(UiServlet.class, "/ui");
+        context.addServlet(UiServlet.class, "/ui/*");
 
         // Ops routes
         context.addServlet(HealthServlet.class, "/health");

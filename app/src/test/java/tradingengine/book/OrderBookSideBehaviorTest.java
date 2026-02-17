@@ -109,4 +109,74 @@ class OrderBookSideBehaviorTest {
         assertTrue(side.cancelOrderById(higher.getId(), new OrderLocator(OrderSide.SELL, 101)));
         assertSame(best, side.peekBestOrderOrNull());
     }
+
+    @Test
+    void snapshotLevels_includesOrdersInFifoOrder() {
+        OrderBookSide side = new OrderBookSide(Long::compareTo);
+
+        Order o1 = new Order(OrderSide.SELL, 100, 3, FIXED_TIME);
+        Order o2 = new Order(OrderSide.SELL, 100, 7, FIXED_TIME);
+        side.addRestingOrder(o1);
+        side.addRestingOrder(o2);
+
+        var levels = side.snapshotLevels();
+        assertEquals(1, levels.size());
+        var level = levels.get(0);
+        assertEquals(2, level.orders().size());
+        assertEquals(o1.getId(), level.orders().get(0).orderId());
+        assertEquals(3L, level.orders().get(0).qty());
+        assertEquals(o2.getId(), level.orders().get(1).orderId());
+        assertEquals(7L, level.orders().get(1).qty());
+    }
+
+    @Test
+    void snapshotLevels_aggregatesMatchOrders() {
+        OrderBookSide side = new OrderBookSide(Long::compareTo);
+
+        Order o1 = new Order(OrderSide.SELL, 100, 4, FIXED_TIME);
+        Order o2 = new Order(OrderSide.SELL, 100, 6, FIXED_TIME);
+        side.addRestingOrder(o1);
+        side.addRestingOrder(o2);
+
+        var level = side.snapshotLevels().get(0);
+        long sum = level.orders().stream().mapToLong(OrderBookSide.RestingOrderSnapshot::qty).sum();
+
+        assertEquals(sum, level.qty());
+        assertEquals(level.orders().size(), level.count());
+    }
+
+    @Test
+    void snapshotLevels_skipsInactiveOrZeroQtyOrders() {
+        OrderBookSide side = new OrderBookSide(Long::compareTo);
+
+        Order cancelled = new Order(OrderSide.SELL, 100, 5, FIXED_TIME);
+        Order active = new Order(OrderSide.SELL, 100, 9, FIXED_TIME);
+        side.addRestingOrder(cancelled);
+        side.addRestingOrder(active);
+        cancelled.cancel();
+
+        var level = side.snapshotLevels().get(0);
+        assertEquals(1, level.count());
+        assertEquals(9L, level.qty());
+        assertEquals(active.getId(), level.orders().get(0).orderId());
+    }
+
+    @Test
+    void snapshotLevels_preservesPricePriority() {
+        OrderBookSide buySide = new OrderBookSide(java.util.Comparator.reverseOrder());
+        buySide.addRestingOrder(new Order(OrderSide.BUY, 101, 1, FIXED_TIME));
+        buySide.addRestingOrder(new Order(OrderSide.BUY, 103, 1, FIXED_TIME));
+
+        var buyLevels = buySide.snapshotLevels();
+        assertEquals(103L, buyLevels.get(0).price());
+        assertEquals(101L, buyLevels.get(1).price());
+
+        OrderBookSide sellSide = new OrderBookSide(java.util.Comparator.naturalOrder());
+        sellSide.addRestingOrder(new Order(OrderSide.SELL, 104, 1, FIXED_TIME));
+        sellSide.addRestingOrder(new Order(OrderSide.SELL, 102, 1, FIXED_TIME));
+
+        var sellLevels = sellSide.snapshotLevels();
+        assertEquals(102L, sellLevels.get(0).price());
+        assertEquals(104L, sellLevels.get(1).price());
+    }
 }
