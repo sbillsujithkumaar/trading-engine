@@ -223,4 +223,9 @@ public class MatchingEngine {
     public List<Trade> tradeHistory() {
         return tradeStore.findAll();
     }
+
+    // For UI and debugging
+    public OrderBook getBook() {
+        return book;
+    }
 }

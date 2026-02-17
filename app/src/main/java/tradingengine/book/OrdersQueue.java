@@ -2,7 +2,9 @@ package tradingengine.book;
 
 import tradingengine.domain.Order;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -56,5 +58,13 @@ public final class OrdersQueue {
     public Order removeById(String orderId) {
         Objects.requireNonNull(orderId, "orderId must not be null");
         return ordersQueue.remove(orderId);
+    }
+
+    /**
+     * Returns a stable FIFO snapshot of orders at this price level.
+     * Used only for debugging/UI dumps.
+     */
+    public List<Order> snapshotFifo() {
+        return new ArrayList<>(ordersQueue.values());
     }
 }

@@ -137,4 +137,11 @@ public class OrderBook {
     public OrderBookSide sellSide() {
         return sellSide;
     }
+
+    /**
+     * Dumps both sides of the book for inspection.
+     */
+    public String dump() {
+        return buySide.dumpSide("BUY (bids)") + "\n" + sellSide.dumpSide("SELL (asks)");
+    }
 }

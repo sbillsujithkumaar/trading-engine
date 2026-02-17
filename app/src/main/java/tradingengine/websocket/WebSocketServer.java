@@ -36,6 +36,8 @@ public final class WebSocketServer {
         // Dev APIs (need runtime, so instantiated manually)
         context.addServlet(new ServletHolder(new OrderApiServlet(runtime)), "/api/order");
         context.addServlet(new ServletHolder(new CancelApiServlet(runtime)), "/api/cancel");
+        context.addServlet(new ServletHolder(new BookApiServlet(runtime)), "/api/book");
+        context.addServlet(new ServletHolder(new TradesApiServlet(runtime)), "/api/trades");
 
 
         // WebSocket streaming endpoint

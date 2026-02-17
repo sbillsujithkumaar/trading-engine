@@ -150,4 +150,34 @@ public class OrderBookSide {
 
         return true;
     }
+
+    /**
+     * Dumps this side of the book in priority order.
+     * For quick UI/debugging.
+     */
+    public String dumpSide(String label) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(label).append("\n");
+
+        if (priceLevels.isEmpty()) {
+            sb.append("(empty)\n");
+            return sb.toString();
+        }
+
+        for (var entry : priceLevels.entrySet()) {
+            long price = entry.getKey();
+            OrdersQueue q = entry.getValue();
+
+            sb.append("price=").append(price).append("\n");
+            for (Order o : q.snapshotFifo()) {
+                sb.append("  ")
+                  .append(o.getId(), 0, Math.min(8, o.getId().length()))
+                  .append(" qty=").append(o.getRemainingQty())
+                  .append(" status=").append(o.getStatus().name())
+                  .append("\n");
+            }
+        }
+
+        return sb.toString();
+    }
 }
