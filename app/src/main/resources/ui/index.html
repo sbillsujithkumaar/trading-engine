@@ -15,6 +15,11 @@
 
 <h2>Trading Engine (Local Demo)</h2>
 
+<p>
+  Connected to: <span id="serverHost"></span><br/>
+  Server files: <code>./data/commands.log</code>, <code>./data/trades.csv</code> (on server)
+</p>
+
 <div>
   Health: <span id="health">...</span> |
   Ready: <span id="ready">...</span> |
@@ -57,6 +62,7 @@
 <script>
   const wsUrl = "ws://" + location.host + "/ws";
   const feed = document.getElementById("feed");
+  document.getElementById("serverHost").textContent = location.host;
 
   function append(line) {
     feed.textContent += line + "\n";
