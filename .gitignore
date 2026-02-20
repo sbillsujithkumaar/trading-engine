@@ -15,8 +15,13 @@ hs_err_pid*
 replay_pid*
 
 # Runtime / persistent data
+app/data/
 docker-data/
 trading-engine-data/
+analytics.csv
+trades.csv
+commands.log
+*.tmp
 
 # OS junk
 .DS_Store
@@ -24,6 +29,3 @@ Thumbs.db
 
 # Node / frontend (if ever added)
 node_modules/
-
-# Kubernetes local artifacts
-*.tmp

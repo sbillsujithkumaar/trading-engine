@@ -70,7 +70,7 @@ This project includes a lightweight backend analytics pipeline that periodically
 **Purpose**
 
 Raw command logs and trade history are useful for replay and audit, but operational systems typically require aggregated metrics for monitoring and analysis.  
-This layer computes those aggregates in a structured, fault-isolated manner.
+This layer computes those aggregates in a structured, failure-isolated manner.
 
 **How It Works**
 
