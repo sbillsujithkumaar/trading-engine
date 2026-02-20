@@ -4,6 +4,7 @@ import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.websocket.server.config.JettyWebSocketServletContainerInitializer;
+import tradingengine.analytics.AnalyticsStore;
 import tradingengine.ops.*;
 
 /**
@@ -20,7 +21,7 @@ public final class WebSocketServer {
 
     private WebSocketServer() {}
 
-    public static Server start(EngineRuntime runtime, int port) throws Exception {
+    public static Server start(EngineRuntime runtime, AnalyticsStore analyticsStore, int port) throws Exception {
         Server server = new Server(port);
         ServletContextHandler context = new ServletContextHandler(server, "/");
 
@@ -39,6 +40,7 @@ public final class WebSocketServer {
         context.addServlet(new ServletHolder(new CancelApiServlet(runtime)), "/api/cancel");
         context.addServlet(new ServletHolder(new BookApiServlet(runtime)), "/api/book");
         context.addServlet(new ServletHolder(new TradesApiServlet(runtime)), "/api/trades");
+        context.addServlet(new ServletHolder(new AnalyticsServlet(analyticsStore)), "/api/analytics");
 
 
         // WebSocket streaming endpoint

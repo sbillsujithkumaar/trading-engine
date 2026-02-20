@@ -7,6 +7,7 @@ This project is backend-first. The browser UI is intentionally thin and reconstr
 ## Project Overview
 
 This service accepts `BUY`/`SELL` limit orders and cancellations, matches orders using price-time priority, persists accepted commands, and can recover state after restart by replaying the command log.
+This engine is intentionally stateful and designed to run as a single authoritative instance backed by a persistent volume.
 
 Key behavior:
 
@@ -15,10 +16,13 @@ Key behavior:
 - Matching supports **price-time priority**, **partial fills**, and **multi-order sweeps**.
 - Persistence is handled through an append-only write-ahead command log (`commands.log`) plus derived trade history (`trades.csv`).
 
+This avoids client-side divergence and ensures state consistency across multiple UI sessions.
+
 Main endpoints:
 
 - Ops: `/health`, `/ready`, `/metrics`
 - Trading APIs: `POST /api/order`, `POST /api/cancel`, `GET /api/book`, `GET /api/trades`
+- Analytics API: `GET /api/analytics` (CSV snapshot)
 - UI: `/ui`
 - WebSocket: `/ws`
 
@@ -58,6 +62,62 @@ flowchart LR
     WS -->|push signal: refresh now| UI
     WAL -->|startup verify + replay| ME
 ```
+
+### Analytics ETL Layer
+
+This project includes a lightweight backend analytics pipeline that periodically aggregates trading activity and current order book state into a persisted snapshot.
+
+**Purpose**
+
+Raw command logs and trade history are useful for replay and audit, but operational systems typically require aggregated metrics for monitoring and analysis.  
+This layer computes those aggregates in a structured, fault-isolated manner.
+
+**How It Works**
+
+A background job (`AnalyticsJob`) runs every 30 seconds and performs:
+
+- **Extract**: snapshot current bids, asks, and executed trades.
+- **Transform**: compute aggregate trading metrics.
+- **Load**: persist a single CSV snapshot to `analytics.csv`.
+
+The latest snapshot is exposed via:
+
+```http
+GET /api/analytics
+```
+
+Response format: `text/csv`.
+
+**Snapshot Schema**
+
+Each snapshot contains:
+
+- `timestamp` - when the snapshot was generated
+- `totalTrades` - number of executed trades
+- `totalVolume` - cumulative traded quantity
+- `avgTradePrice` - quantity-weighted average trade price
+- `bestBid` - highest resting BUY price (nullable)
+- `bestAsk` - lowest resting SELL price (nullable)
+- `openOrders` - total resting orders in the book
+
+Example:
+
+```csv
+timestamp,totalTrades,totalVolume,avgTradePrice,bestBid,bestAsk,openOrders
+2026-02-20T17:35:58Z,24,120,170.95833,,100,2
+```
+
+**Design Properties**
+
+- Snapshots are written using a temporary file plus move/replace strategy (atomic move where supported).
+- Analytics failures do not stop the trading engine (best-effort policy).
+- A snapshot is generated on startup after replay and before readiness flips to `READY`.
+- Analytics are intentionally separated from matching logic:
+  - `AnalyticsCalculator` (pure transformation logic)
+  - `AnalyticsStore` (persistence layer)
+  - `AnalyticsJob` (ETL orchestration)
+
+This provides a minimal but production-style ETL pipeline without coupling analytics to core trading logic.
 
 ## Key Engineering Features
 
@@ -209,7 +269,9 @@ gradlew.bat :app:run
 gradlew.bat test
 ```
 
-## Docker Deployment
+## Docker (Standalone Runtime)
+
+Use this mode for quick standalone runs outside the step-by-step demo flow.
 
 Build image:
 
@@ -237,36 +299,92 @@ docker run --rm -p 8080:8080 \
   trading-engine:dev
 ```
 
-## AWS EC2 Deployment
+## Kubernetes Deployment
 
-Minimal EC2 flow:
+Primary deployment is Kubernetes on **AWS EC2 + k3s**.  
+The same manifests also work on standard Kubernetes distributions (for example, Minikube).
+The cluster runs as a single-node k3s installation on AWS EC2 for simplicity. The manifests are standard Kubernetes YAML and portable across environments.
 
-1. Launch an EC2 instance (Ubuntu) and allow inbound TCP `8080` in the security group.
-2. Install Docker and clone the repo.
-3. Build and run the container with a persistent host directory mounted to `/data`.
+Manifests live in `k8s/`:
+- `deployment.yaml` -> runs the trading engine pod
+- `service.yaml` -> stable in-cluster endpoint (`trading-engine-svc:8080`)
+- `pvc.yaml` -> durable storage for `/data`
 
-Example:
+### Reference Setup (AWS EC2 + k3s)
+
+Build image on EC2:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y docker.io git
-sudo systemctl enable --now docker
-
-git clone <your-repo-url>
-cd trading-engine
 docker build -t trading-engine:prod .
-
-mkdir -p ~/trading-engine-data
-docker run -d --name trading-engine \
-  -p 8080:8080 \
-  -e DATA_DIR=/data \
-  -v ~/trading-engine-data:/data \
-  trading-engine:prod
 ```
 
-Access:
+k3s uses containerd as its container runtime; locally built Docker images must therefore be imported into the k3s image store before use.
 
-- `http://<EC2_PUBLIC_IP>:8080/ui`
+```bash
+docker save trading-engine:prod | sudo k3s ctr images import -
+```
+
+Apply and verify:
+
+```bash
+sudo kubectl apply -f k8s/
+sudo kubectl get pods
+sudo kubectl logs -l app=trading-engine
+```
+
+Access UI:
+
+```bash
+sudo kubectl port-forward svc/trading-engine-svc 8080:8080 --address 0.0.0.0
+```
+
+Open `http://<EC2_PUBLIC_IP>:8080/ui`.
+
+### Persistence and Integrity
+
+- Engine state is stored at `/data` using a PVC (`commands.log` + `trades.csv`).
+- On restart, state is rebuilt by command-log replay.
+- If tampering is detected on startup, engine fails fast and pod can enter `CrashLoopBackOff`.
+
+Diagnose:
+
+```bash
+sudo kubectl get pods
+sudo kubectl logs -l app=trading-engine
+sudo kubectl describe pod -l app=trading-engine
+```
+
+Demo/dev manual reset only:
+
+```bash
+sudo kubectl exec -it deploy/trading-engine -- rm -f /data/commands.log /data/trades.csv
+sudo kubectl delete pod -l app=trading-engine
+```
+
+In production, restore `/data` from backup instead of deleting files.
+
+### Local Kubernetes (Optional)
+
+If you want local testing with Minikube, use the same `k8s/` manifests:
+
+```bash
+minikube start
+eval $(minikube docker-env)
+docker build -t trading-engine:prod .
+kubectl apply -f k8s/
+kubectl port-forward svc/trading-engine-svc 8080:8080
+```
+
+Open `http://localhost:8080/ui`.
+
+### Why one replica?
+
+This project currently uses `replicas: 1` because the engine is stateful and tied to one persisted `/data` volume.
+Scaling would require externalized storage and leader election, which are intentionally out of scope for this design.
+
+## AWS EC2 Deployment
+
+Primary EC2 deployment path is the Kubernetes setup above (`k3s` on EC2).
 
 ## Testing
 
@@ -289,6 +407,7 @@ Run all tests with:
 
 - Backend system design beyond UI concerns.
 - Deterministic state reconstruction from an append-only command history.
-- Snapshot reconciliation model (`HTTP snapshots + WebSocket push signal`).
-- Cloud-friendly deployment using Docker and persistent volumes.
-- Operational thinking: health/readiness/metrics, restart behavior, and recovery guarantees.
+- Snapshot reconciliation model (HTTP snapshots + WebSocket push signal).
+- Lightweight ETL analytics pipeline (Extract -> Transform -> Load) generating persisted trading metrics.
+- Containerized deployment with Kubernetes-managed lifecycle (Deployment, Service, PVC), liveness/readiness probes, and fail-fast integrity behavior surfaced as CrashLoopBackOff.
+- Operational thinking: health/readiness/metrics, restart behavior, persistence guarantees, and failure isolation.
