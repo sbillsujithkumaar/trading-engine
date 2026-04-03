@@ -1,5 +1,6 @@
-name: CI
+name: CI/CD
 
+# Triggers: run on every push or PR to main
 on:
   push:
     branches: ["main"]
@@ -7,6 +8,7 @@ on:
     branches: ["main"]
 
 jobs:
+  # JOB 1: Build, test, and push to ECR
   build:
     runs-on: ubuntu-latest
 
@@ -26,5 +28,93 @@ jobs:
       - name: Run Gradle build + tests
         run: ./gradlew clean test
 
+      # Builds the Docker image using a multi-stage Dockerfile:
+      #   Stage 1 (JDK): compiles the Java source code with Gradle
+      #   Stage 2 (JRE): copies only the compiled output into a lean runtime image
+      # The final image only contains the JRE and the compiled app — not the compiler
+      # or build tools — keeping the image size small (~200MB vs ~500MB with JDK)
+      #
+      # Tagged with the git commit SHA so every build is uniquely identifiable
+      # and traceable back to the exact commit that produced it
       - name: Build Docker image
-        run: docker build -t trading-engine:ci .
+        run: docker build -t trading-engine:${{ github.sha }} .
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push image to ECR with SHA tag
+        run: |
+          docker tag trading-engine:${{ github.sha }} ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:${{ github.sha }}
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:${{ github.sha }}
+
+  # JOB 2: Promote SHA image to :prod and deploy to EC2
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build # waits for build job to pass before running
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Gives GitHub Actions permission to talk to AWS
+      # Same IAM credentials as the build job
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # Authenticates Docker with ECR so we can pull and retag images
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Retags the SHA image as :prod in ECR — no rebuild needed
+      # This promotes the exact image that passed CI to production
+      # The SHA tag is preserved so we can always trace :prod back to its commit
+      - name: Promote SHA image to :prod in ECR
+        run: |
+          docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:${{ github.sha }}
+          docker tag ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:${{ github.sha }} ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:prod
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:prod
+
+      - name: Authenticate Docker on EC2 to pull from ECR
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+
+      - name: Pull latest prod image from ECR
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:prod
+
+      - name: Update k3s deployment to use new image
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: kubectl set image deployment/trading-engine trading-engine=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:prod
+
+      - name: Wait for rollout to complete
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: kubectl rollout status deployment/trading-engine
+

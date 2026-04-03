@@ -9,6 +9,8 @@ metadata:
 spec:
   replicas: 1
   strategy:
+    # Recreate ensures only one pod owns the volume at a time
+    # RollingUpdate would cause volume conflicts since both old and new pods would run simultaneously
     type: Recreate
   selector:
     matchLabels:
@@ -20,8 +22,11 @@ spec:
     spec:
       containers:
         - name: trading-engine
-          image: trading-engine:prod
-          imagePullPolicy: IfNotPresent
+          # Previously trading-engine:prod (local image built manually on EC2)
+          # Now points to ECR so k3s pulls the image from the registry automatically
+          # This means no manual docker build on EC2 is needed — CI/CD handles everything
+          image: 020880439584.dkr.ecr.eu-north-1.amazonaws.com/trading-engine:prod
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
 
