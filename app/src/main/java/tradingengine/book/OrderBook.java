@@ -22,7 +22,7 @@ public class OrderBook {
 
     private final OrderBookSide buySide;
     private final OrderBookSide sellSide;
-    private final Map<String, OrderLocator> orderIndex;
+    private final Map<String, OrderLocator> orderIndex; // For delete-by-id
 
     /**
      * Creates an empty order book.
@@ -55,7 +55,7 @@ public class OrderBook {
     }
 
     /**
-     * Cancel an order by id. Cancellation is idempotent and removes immediately.
+     * Cancel an order by id. Cancellation is idempotent and removes immediately. ONLY FOR TESTING - use {@link #cancelOrderAndGetLocator} for production so the matching engine can emit events with side and price.
      *
      * @param orderId the order id to cancel
      * @return {@code true} if the order was removed

@@ -1,3 +1,7 @@
+# Kubernetes Deployment for Trading Engine
+# This deployment configuration defines a single replica of the trading engine application.
+# It uses the "trading-engine:prod" Docker image, which should be built and pushed to a container registry before applying this deployment.
+# The application listens on port 8080 and uses a Persistent Volume Claim for data storage. Liveness and readiness probes are configured to ensure the application is healthy and ready to serve traffic.   
 apiVersion: apps/v1
 kind: Deployment
 metadata:

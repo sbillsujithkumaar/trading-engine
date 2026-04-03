@@ -5,7 +5,7 @@ WORKDIR /app
 # Copy everything needed to build
 COPY . .
 
-# Build the app (skip tests only if you want faster builds)
+# Build the app ("-x test": skips tests as CI already ran them)
 RUN chmod +x ./gradlew && ./gradlew clean :app:installDist -x test
 
 # Runtime stage (smaller image)

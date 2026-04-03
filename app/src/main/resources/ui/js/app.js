@@ -105,6 +105,7 @@ export function boot(els) {
     expandedLevels.delete(key);
   }
 
+  // Removes any expanded levels that no longer exist in the book snapshot. This keeps the UI from trying to expand a level that disappeared, which would look broken and cause errors on orderId copy.
   function pruneExpandedLevels(book) {
     const live = new Set();
     const bids = Array.isArray(book?.bids) ? book.bids : [];
@@ -123,6 +124,7 @@ export function boot(els) {
     }
   }
 
+  // Fetches and renders the latest book and trades snapshots. Called on boot, after order/cancel, and on WS push (debounced).
   async function refreshSnapshots(reason) {
     const started = Date.now();
     els.refreshVal.textContent = `${fmtTime(Date.now())} (${reason})`;
@@ -179,6 +181,7 @@ export function boot(els) {
     return null;
   }
 
+  // SUBMIT ORDER BUTTON
   els.submitBtn.addEventListener("click", async () => {
     els.submitBtn.disabled = true;
     els.orderMsg.textContent = "";
@@ -215,11 +218,12 @@ export function boot(els) {
     }
   });
 
+  // CANCEL BUTTON
   els.cancelBtn.addEventListener("click", async () => {
     els.cancelBtn.disabled = true;
     els.cancelMsg.textContent = "";
 
-    const id = els.cancelId.value.trim();
+    const id = els.cancelId.value.trim(); // grab the id I typed
     if (!id) {
       showMsg(els.cancelMsg, false, "Please paste an orderId to cancel");
       els.cancelBtn.disabled = false;
@@ -227,7 +231,7 @@ export function boot(els) {
     }
 
     try {
-      const res = await cancelOrder({ orderId: id });
+      const res = await cancelOrder({ orderId: id }); // sends REST request to cancel
       showMsg(
         els.cancelMsg,
         true,

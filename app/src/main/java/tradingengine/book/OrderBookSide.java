@@ -85,9 +85,9 @@ public class OrderBookSide {
             return null;
         }
 
-        return priceLevels.firstEntry()
-                .getValue()
-                .peekOldest();
+        return priceLevels.firstEntry() // first = best price (due to comparator)
+                .getValue()             // gets the queue at that price
+                .peekOldest();          // gets the front of the FIFO queue
     }
 
     /**
