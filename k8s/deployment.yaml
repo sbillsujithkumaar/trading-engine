@@ -20,8 +20,6 @@ spec:
       labels:
         app: trading-engine
     spec:
-      imagePullSecrets:
-        - name: ecr-secret
       containers:
         - name: trading-engine
           # Previously trading-engine:prod (local image built manually on EC2)
