@@ -36,3 +36,4 @@ terraform/terraform.tfstate
 terraform/terraform.tfstate.backup
 terraform/*.exe
 terraform/LICENSE.txt
+terraform/terraform.tfstate*
