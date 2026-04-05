@@ -82,18 +82,8 @@ echo 'export KUBECONFIG=/home/ec2-user/.kube/config' >> /home/ec2-user/.bashrc
 
 echo "=== kubeconfig set up ==="
 
-# ── STEP 5: Apply Kubernetes manifests ───────────────────────────────
-# Clone repo temporarily just to apply k8s manifests
-# Deleted immediately after — EC2 doesn't need the source code
-echo "=== Applying k8s manifests ==="
-git clone https://github.com/sbillsujithkumaar/trading-engine.git /tmp/trading-engine
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-kubectl apply -f /tmp/trading-engine/k8s/
-rm -rf /tmp/trading-engine
-
-echo "=== k8s manifests applied ==="
-
-# ── STEP 6: Format and mount EBS volume ──────────────────────────────
+# ── STEP 5: Format and mount EBS volume ──────────────────────────────
+# MUST happen before applying k8s manifests so PVC binds to EBS storage
 # The EBS volume is attached at /dev/nvme1n1 (10GB persistent storage)
 # This volume survives terraform destroy — data is preserved
 # We format it only if it hasn't been formatted before
@@ -119,5 +109,18 @@ mount /dev/nvme1n1 /mnt/trading-data
 echo '/dev/nvme1n1 /mnt/trading-data ext4 defaults,nofail 0 2' >> /etc/fstab
 
 echo "=== EBS volume mounted at /mnt/trading-data ==="
+
+# ── STEP 6: Apply Kubernetes manifests ───────────────────────────────
+# EBS volume must be mounted first so PVC binds to /mnt/trading-data
+# not to k3s default local-path storage
+# Clone repo temporarily just to apply k8s manifests
+# Deleted immediately after — EC2 doesn't need the source code
+echo "=== Applying k8s manifests ==="
+git clone https://github.com/sbillsujithkumaar/trading-engine.git /tmp/trading-engine
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+kubectl apply -f /tmp/trading-engine/k8s/
+rm -rf /tmp/trading-engine
+
+echo "=== k8s manifests applied ==="
 
 echo "=== Bootstrap complete. EC2 is ready ==="
