@@ -265,7 +265,9 @@ public class MatchingEngine {
                 sell.getId(),
                 resting.getPrice(),
                 fillQty,
-                Instant.now(clock)
+                // Use the aggressive order timestamp so replay rebuilds the same
+                // trade history even when recovery runs under a different clock.
+                incoming.getTimestamp()
         );
         tradeStore.save(trade);
         return trade;

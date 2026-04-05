@@ -128,6 +128,22 @@ class MatchingEngineIntegrationTest {
         assertEquals(restingSell.getId(), trades.get(0).sellOrderId());
     }
 
+    // Ensures persisted trade timestamps stay anchored to the aggressive order.
+    @Test
+    void tradeTimestampUsesIncomingOrderTimestamp() {
+        MatchingEngine engine = new MatchingEngine(new OrderBook(), FIXED_CLOCK, new EventDispatcher(), tradeStore());
+
+        Order restingSell = new Order(OrderSide.SELL, 100, 5, Instant.parse("2026-01-01T00:00:00Z"));
+        engine.submit(restingSell);
+
+        Instant incomingTimestamp = Instant.parse("2026-01-01T00:05:00Z");
+        Order incomingBuy = new Order(OrderSide.BUY, 100, 5, incomingTimestamp);
+        List<Trade> trades = engine.submit(incomingBuy);
+
+        assertEquals(1, trades.size());
+        assertEquals(incomingTimestamp, trades.get(0).timestamp());
+    }
+
     // Ensures non-crossing prices do not trade.
     @Test
     void nonCrossingOrdersDoNotTrade() {

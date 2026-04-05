@@ -27,6 +27,7 @@ class CommandLogRecoveryIntegrationTest {
 
     private static final Instant FIXED_INSTANT = Instant.parse("2026-01-01T00:00:00Z");
     private static final Clock FIXED_CLOCK = Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC);
+    private static final Clock RECOVERY_CLOCK = Clock.fixed(Instant.parse("2030-06-01T12:34:56Z"), ZoneOffset.UTC);
 
     @TempDir
     Path tempDir;
@@ -40,9 +41,13 @@ class CommandLogRecoveryIntegrationTest {
     }
 
     private MatchingEngine newEngine(Path commands, Path trades) {
+        return newEngine(commands, trades, FIXED_CLOCK);
+    }
+
+    private MatchingEngine newEngine(Path commands, Path trades, Clock clock) {
         return new MatchingEngine(
                 new OrderBook(),
-                FIXED_CLOCK,
+                clock,
                 new EventDispatcher(),
                 new FileTradeStore(trades),
                 new CommandLog(commands)
@@ -50,7 +55,11 @@ class CommandLogRecoveryIntegrationTest {
     }
 
     private static Order order(OrderSide side, long price, long quantity) {
-        return new Order(side, price, quantity, Instant.now(FIXED_CLOCK));
+        return order(side, price, quantity, FIXED_CLOCK);
+    }
+
+    private static Order order(OrderSide side, long price, long quantity, Clock clock) {
+        return new Order(side, price, quantity, Instant.now(clock));
     }
 
     private static void replay(CommandLog log, MatchingEngine engine) {
@@ -75,10 +84,14 @@ class CommandLogRecoveryIntegrationTest {
     }
 
     private static void runScenario(MatchingEngine engine) {
-        engine.submit(order(OrderSide.BUY, 100, 10));
-        engine.submit(order(OrderSide.BUY, 99, 5));
-        engine.submit(order(OrderSide.SELL, 100, 3));
-        engine.submit(order(OrderSide.SELL, 100, 7));
+        runScenario(engine, FIXED_CLOCK);
+    }
+
+    private static void runScenario(MatchingEngine engine, Clock clock) {
+        engine.submit(order(OrderSide.BUY, 100, 10, clock));
+        engine.submit(order(OrderSide.BUY, 99, 5, clock));
+        engine.submit(order(OrderSide.SELL, 100, 3, clock));
+        engine.submit(order(OrderSide.SELL, 100, 7, clock));
     }
 
     private static void seedThreeRecords(CommandLog log) {
@@ -128,6 +141,30 @@ class CommandLogRecoveryIntegrationTest {
         replay(new CommandLog(commands), recoveredEngine);
 
         assertEquals(initialTradeCount, recoveredEngine.tradeHistory().size());
+    }
+
+    // Rationale: Recovery must preserve the original trade instants even when the process restarts under a later clock.
+    @Test
+    void replayPreservesTradeTimestampsWhenRecoveryClockDiffers() throws IOException {
+        Path commands = commandsPath();
+        Path trades = tradesPath();
+
+        MatchingEngine liveEngine = newEngine(commands, trades, FIXED_CLOCK);
+        runScenario(liveEngine, FIXED_CLOCK);
+
+        List<Trade> expectedTrades = new ArrayList<>(liveEngine.tradeHistory());
+        List<String> expectedLines = Files.readAllLines(trades, StandardCharsets.UTF_8);
+        assertTrue(expectedLines.stream().allMatch(line -> line.endsWith("Z")));
+
+        FileTradeStore recoveredStore = new FileTradeStore(trades);
+        recoveredStore.clear();
+        MatchingEngine recoveredEngine = newEngine(commands, trades, RECOVERY_CLOCK);
+        replay(new CommandLog(commands), recoveredEngine);
+
+        List<String> rebuiltLines = Files.readAllLines(trades, StandardCharsets.UTF_8);
+        assertEquals(expectedTrades, recoveredEngine.tradeHistory());
+        assertEquals(expectedLines, rebuiltLines);
+        assertTrue(rebuiltLines.stream().allMatch(line -> line.endsWith("Z")));
     }
 
     // Rationale: If any field in a persisted record is tampered, hash verification must fail on startup.
