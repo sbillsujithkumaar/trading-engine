@@ -74,6 +74,15 @@ resource "aws_security_group" "trading_engine_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # Allow external access to trading engine UI and API
+  ingress {
+    description = "Trading engine NodePort"
+    from_port   = 30080
+    to_port     = 30080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   # Allow all outbound traffic — needed to pull from ECR, talk to AWS
   egress {
     from_port   = 0
