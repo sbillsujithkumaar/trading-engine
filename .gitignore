@@ -29,3 +29,10 @@ Thumbs.db
 
 # Node / frontend (if ever added)
 node_modules/
+
+# Terraform
+terraform/.terraform/
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/*.exe
+terraform/LICENSE.txt

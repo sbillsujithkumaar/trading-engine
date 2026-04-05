@@ -102,13 +102,16 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:prod
 
-      - name: Update k3s deployment to use new image
+      # Forces k3s to create a new pod regardless of whether image URI changed
+      # kubectl rollout restart adds a timestamp annotation to the pod spec
+      # triggering a new pod which pulls fresh :prod from ECR via imagePullPolicy: Always
+      - name: Restart k3s deployment to pull latest image
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          script: sudo kubectl set image deployment/trading-engine trading-engine=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:prod
+          script: kubectl rollout restart deployment/trading-engine
 
       - name: Wait for rollout to complete
         uses: appleboy/ssh-action@v1
@@ -117,4 +120,3 @@ jobs:
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           script: sudo kubectl rollout status deployment/trading-engine
-

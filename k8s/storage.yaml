@@ -1,0 +1,34 @@
+# StorageClass — defines how storage is provisioned
+# "no-provisioner" means we manually define the volume location
+# WaitForFirstConsumer — only binds when a pod actually needs it
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-storage
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+
+---
+# PersistentVolume — points to /mnt/trading-data on EC2
+# This is the EBS volume mounted by userdata.sh
+# Survives pod restarts and terraform destroy/apply cycles
+# Retain policy means data is kept even if PVC is deleted
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: trading-engine-pv
+spec:
+  capacity:
+    storage: 9Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  local:
+    path: /mnt/trading-data
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: Exists
