@@ -83,56 +83,48 @@ echo 'export KUBECONFIG=/home/ec2-user/.kube/config' >> /home/ec2-user/.bashrc
 echo "=== kubeconfig set up ==="
 
 # ── STEP 5: Format and mount EBS volume ──────────────────────────────
-# Known Terraform issue: EBS volumes attach AFTER EC2 boots
-# so userdata must wait for the volume to be ready
-# We temporarily disable set -e here because blkid returns non-zero
-# on unformatted volumes — which would kill the script with set -e active
+# Terraform attaches the retained EBS volume after EC2 starts booting.
+# Wait for the specific volume by ID so we don't guess based on unstable NVMe
+# numbering and accidentally probe or format the wrong disk.
 echo "=== Setting up EBS volume ==="
 
-# Temporarily disable exit-on-error for EBS setup
-# blkid returns non-zero on unformatted volumes — this is expected, not an error
-set +e
+EBS_ID="__TRADING_DATA_VOLUME_ID__"
+EBS_ID_NODASH="${EBS_ID//-/}"
+STABLE_DEV="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${EBS_ID_NODASH}"
 
-# Wait for EBS device to be attached by Terraform
-echo "=== Waiting for EBS device to appear ==="
-for i in $(seq 1 60); do
-  if [ -e /dev/nvme1n1 ]; then
-    echo "EBS device present after ${i} seconds"
-    break
-  fi
-  sleep 2
-done
+echo "=== Waiting for EBS volume ${EBS_ID} to be attached ==="
+udevadm settle --exit-if-exists="${STABLE_DEV}" --timeout=60 || {
+  echo "ERROR: EBS volume ${EBS_ID} did not appear within 60 seconds"
+  exit 1
+}
+echo "EBS volume attached at ${STABLE_DEV}"
 
-# Wait for filesystem metadata to be readable
-echo "=== Waiting for EBS filesystem to be readable ==="
-for i in $(seq 1 30); do
-  result=$(sudo blkid /dev/nvme1n1 2>/dev/null)
-  if [ -n "$result" ]; then
-    echo "EBS filesystem readable after ${i} seconds"
-    break
-  fi
-  sleep 1
-done
-
-# Check if volume already has a filesystem
-HAS_FS=$(sudo blkid /dev/nvme1n1 2>/dev/null | grep -c "TYPE")
-
-# Re-enable exit-on-error
-set -e
-
-if [ "$HAS_FS" -eq 0 ]; then
-  # No filesystem found — format it (first time only)
-  mkfs -t ext4 /dev/nvme1n1
-  echo "=== EBS volume formatted ==="
+if fs_type=$(blkid -p -o value -s TYPE "${STABLE_DEV}" 2>/dev/null); then
+  echo "=== EBS volume already formatted (${fs_type}), skipping ==="
 else
-  echo "=== EBS volume already formatted, skipping ==="
+  echo "=== Formatting EBS volume (first time) ==="
+  mkfs.ext4 -F "${STABLE_DEV}"
+  echo "=== EBS volume formatted ==="
 fi
 
-# Create mount point and mount
+VOL_UUID=$(blkid -p -o value -s UUID "${STABLE_DEV}")
+echo "EBS volume UUID: ${VOL_UUID}"
+
 mkdir -p /mnt/trading-data
-mount /dev/nvme1n1 /mnt/trading-data
-echo '/dev/nvme1n1 /mnt/trading-data ext4 defaults,nofail 0 2' >> /etc/fstab
-echo "=== EBS volume mounted at /mnt/trading-data ==="
+
+if ! mountpoint -q /mnt/trading-data; then
+  mount "UUID=${VOL_UUID}" /mnt/trading-data
+  echo "=== EBS volume mounted at /mnt/trading-data ==="
+else
+  echo "=== EBS volume already mounted at /mnt/trading-data ==="
+fi
+
+if ! grep -q "^UUID=${VOL_UUID} /mnt/trading-data " /etc/fstab; then
+  echo "UUID=${VOL_UUID} /mnt/trading-data ext4 defaults,nofail 0 2" >> /etc/fstab
+  echo "=== fstab entry added ==="
+else
+  echo "=== fstab entry already present ==="
+fi
 
 # ── STEP 6: Apply Kubernetes manifests ───────────────────────────────
 # EBS volume must be mounted first so PVC binds to /mnt/trading-data

@@ -13,6 +13,22 @@ provider "aws" {
   region = var.aws_region
 }
 
+# Persistent EBS volume lookup.
+# The volume is created and retained outside this stack so Terraform destroy
+# only removes the EC2 instance and its attachment.
+data "aws_ebs_volume" "trading_data" {
+  filter {
+    name   = "volume-id"
+    values = [var.trading_data_volume_id]
+  }
+}
+
+# Explicit subnet selection keeps the EC2 instance in the same AZ as the
+# retained EBS volume. Without this, AWS may launch the instance elsewhere.
+data "aws_subnet" "trading_engine" {
+  id = var.trading_engine_subnet_id
+}
+
 # ── IAM ROLE (solves Issue 3) ────────────────────────────────────────
 # Instead of storing static AWS credentials on EC2 (aws configure),
 # we attach an IAM role so EC2 gets auto-rotating temporary credentials
@@ -108,6 +124,9 @@ resource "aws_instance" "trading_engine" {
   # SSH key pair for access — must exist in AWS already
   key_name = var.key_pair_name
 
+  # Pin EC2 to the subnet that matches the persistent EBS volume's AZ.
+  subnet_id = data.aws_subnet.trading_engine.id
+
   # Attach IAM role via instance profile
   iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
 
@@ -116,12 +135,23 @@ resource "aws_instance" "trading_engine" {
 
   # Bootstrap script — runs once at launch
   # Installs Docker, k3s, fixes permissions, configures ECR
-  user_data = file("userdata.sh")
+  user_data = replace(
+    file("${path.module}/userdata.sh"),
+    "__TRADING_DATA_VOLUME_ID__",
+    var.trading_data_volume_id
+  )
 
   # Storage — 20GB is enough for the app + Docker images
   root_block_device {
     volume_size = 20
     volume_type = "gp3"
+  }
+
+  lifecycle {
+    precondition {
+      condition     = data.aws_subnet.trading_engine.availability_zone == data.aws_ebs_volume.trading_data.availability_zone
+      error_message = "trading_engine_subnet_id must be in the same Availability Zone as trading_data_volume_id."
+    }
   }
 
   tags = {
@@ -148,24 +178,11 @@ resource "aws_eip_association" "trading_engine_ip" {
 }
 
 
-# ── EBS VOLUME (fixes data loss problem) ─────────────────────────────
-# A separate persistent volume for trading engine data
-# Survives terraform destroy — data is preserved between EC2 recreations
-# Contains: command log, trades.csv
-# Attached to EC2 at /dev/sdf, mounted by k3s PVC at /data
-resource "aws_ebs_volume" "trading_data" {
-  availability_zone = aws_instance.trading_engine.availability_zone
-  size              = 10
-  type              = "gp3"
-
-  tags = {
-    Name = "trading-engine-data"
-  }
-}
-
-# Attach the EBS volume to EC2 at /dev/sdf
+# ── EBS ATTACHMENT (persistent volume managed outside this stack) ────
+# The volume already exists. Terraform only manages its attachment to the
+# current EC2 instance so destroy/apply cycles keep the data disk.
 resource "aws_volume_attachment" "trading_data_attachment" {
   device_name = "/dev/sdf"
-  volume_id   = aws_ebs_volume.trading_data.id
+  volume_id   = data.aws_ebs_volume.trading_data.id
   instance_id = aws_instance.trading_engine.id
 }
