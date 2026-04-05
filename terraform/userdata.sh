@@ -83,24 +83,45 @@ echo 'export KUBECONFIG=/home/ec2-user/.kube/config' >> /home/ec2-user/.bashrc
 echo "=== kubeconfig set up ==="
 
 # ── STEP 5: Format and mount EBS volume ──────────────────────────────
+# Known Terraform issue: EBS volumes attach AFTER EC2 boots
+# so userdata must wait for the volume to be ready
+# We temporarily disable set -e here because blkid returns non-zero
+# on unformatted volumes — which would kill the script with set -e active
 echo "=== Setting up EBS volume ==="
 
-# Wait for EBS volume to be attached AND filesystem to be readable
-# Loops until blkid can successfully read the device
-# This is more reliable than sleep — waits for the actual condition we need
-echo "=== Waiting for EBS volume to be ready ==="
+# Temporarily disable exit-on-error for EBS setup
+# blkid returns non-zero on unformatted volumes — this is expected, not an error
+set +e
+
+# Wait for EBS device to be attached by Terraform
+echo "=== Waiting for EBS device to appear ==="
 for i in $(seq 1 60); do
-  if sudo blkid /dev/nvme1n1 > /dev/null 2>&1; then
-    echo "EBS volume ready after ${i} seconds"
+  if [ -e /dev/nvme1n1 ]; then
+    echo "EBS device present after ${i} seconds"
     break
   fi
   sleep 2
 done
 
+# Wait for filesystem metadata to be readable
+echo "=== Waiting for EBS filesystem to be readable ==="
+for i in $(seq 1 30); do
+  result=$(sudo blkid /dev/nvme1n1 2>/dev/null)
+  if [ -n "$result" ]; then
+    echo "EBS filesystem readable after ${i} seconds"
+    break
+  fi
+  sleep 1
+done
+
 # Check if volume already has a filesystem
-HAS_FS=$(sudo blkid /dev/nvme1n1 2>/dev/null | grep -c "TYPE" || true)
+HAS_FS=$(sudo blkid /dev/nvme1n1 2>/dev/null | grep -c "TYPE")
+
+# Re-enable exit-on-error
+set -e
 
 if [ "$HAS_FS" -eq 0 ]; then
+  # No filesystem found — format it (first time only)
   mkfs -t ext4 /dev/nvme1n1
   echo "=== EBS volume formatted ==="
 else
