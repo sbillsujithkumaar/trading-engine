@@ -91,9 +91,11 @@ echo "=== kubeconfig set up ==="
 echo "=== Setting up EBS volume ==="
 
 # Check if volume already has a filesystem
-# Uses sudo blkid with grep for TYPE — more reliable than bare blkid
-# Without this check, the volume gets reformatted on every EC2 recreation, wiping data
-if ! sudo blkid /dev/nvme1n1 | grep -q "TYPE"; then
+# Uses variable assignment to avoid set -e killing the script on pipe failure
+# blkid returns non-zero on unformatted volumes which triggers set -e in pipes
+HAS_FS=$(sudo blkid /dev/nvme1n1 2>/dev/null | grep -c "TYPE" || true)
+
+if [ "$HAS_FS" -eq 0 ]; then
   # No filesystem found — format it (first time only)
   mkfs -t ext4 /dev/nvme1n1
   echo "=== EBS volume formatted ==="
