@@ -55,17 +55,14 @@ jobs:
           docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:${{ github.sha }}
 
   # JOB 2: Promote SHA image to :prod and deploy to EC2
+  # No checkout needed — this job only talks to AWS and EC2
   deploy:
     runs-on: ubuntu-latest
-    needs: build # waits for build job to pass before running
+    needs: build
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       # Gives GitHub Actions permission to talk to AWS
-      # Same IAM credentials as the build job
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -86,37 +83,29 @@ jobs:
           docker tag ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:${{ github.sha }} ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:prod
           docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:prod
 
-      - name: Authenticate Docker on EC2 to pull from ECR
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ec2-user
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
-
-      - name: Pull latest prod image from ECR
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ec2-user
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:prod
-
       # Forces k3s to create a new pod regardless of whether image URI changed
       # kubectl rollout restart adds a timestamp annotation to the pod spec
       # triggering a new pod which pulls fresh :prod from ECR via imagePullPolicy: Always
+      # No docker login or docker pull needed on EC2 — ECR credential provider
+      # handles authentication automatically via IAM role
+      # KUBECONFIG exported explicitly — appleboy/ssh-action uses non-login shell
+      # so .bashrc is not sourced and KUBECONFIG would not be set otherwise
+      # /usr/local/bin/kubectl used for maximum robustness — avoids PATH issues
       - name: Restart k3s deployment to pull latest image
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          script: kubectl rollout restart deployment/trading-engine
+          script: export KUBECONFIG=/home/ec2-user/.kube/config && /usr/local/bin/kubectl rollout restart deployment/trading-engine
 
+      # Blocks until the new pod passes liveness + readiness probes
+      # --timeout=180s gives the pod 3 minutes to become healthy
+      # If it never becomes healthy, this step fails and pipeline goes red
       - name: Wait for rollout to complete
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          script: sudo kubectl rollout status deployment/trading-engine
+          script: export KUBECONFIG=/home/ec2-user/.kube/config && /usr/local/bin/kubectl rollout status deployment/trading-engine --timeout=180s
