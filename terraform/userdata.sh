@@ -101,7 +101,9 @@ echo "=== k8s manifests applied ==="
 echo "=== Setting up EBS volume ==="
 
 # Check if volume already has a filesystem
-if ! blkid /dev/nvme1n1; then
+# Uses sudo blkid with grep for TYPE — more reliable than bare blkid
+# Without this check, the volume gets reformatted on every EC2 recreation, wiping data
+if ! sudo blkid /dev/nvme1n1 | grep -q "TYPE"; then
   # No filesystem found — format it (first time only)
   mkfs -t ext4 /dev/nvme1n1
   echo "=== EBS volume formatted ==="
