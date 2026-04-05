@@ -1,6 +1,5 @@
 name: CI/CD
 
-# Triggers: run on every push or PR to main
 on:
   push:
     branches: ["main"]
@@ -8,8 +7,7 @@ on:
     branches: ["main"]
 
 jobs:
-  # JOB 1: Build, test, and push to ECR
-  build:
+  test:
     runs-on: ubuntu-latest
 
     steps:
@@ -28,14 +26,17 @@ jobs:
       - name: Run Gradle build + tests
         run: ./gradlew clean test
 
-      # Builds the Docker image using a multi-stage Dockerfile:
-      #   Stage 1 (JDK): compiles the Java source code with Gradle
-      #   Stage 2 (JRE): copies only the compiled output into a lean runtime image
-      # The final image only contains the JRE and the compiled app — not the compiler
-      # or build tools — keeping the image size small (~200MB vs ~500MB with JDK)
-      #
-      # Tagged with the git commit SHA so every build is uniquely identifiable
-      # and traceable back to the exact commit that produced it
+  # Publish immutable SHA images only for main-branch pushes.
+  # The prod tag is retained as a bootstrap fallback for fresh EC2 nodes.
+  publish-image:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Build Docker image
         run: docker build -t trading-engine:${{ github.sha }} .
 
@@ -49,63 +50,37 @@ jobs:
       - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Push image to ECR with SHA tag
+      - name: Push SHA and prod tags to ECR
         run: |
-          docker tag trading-engine:${{ github.sha }} ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:${{ github.sha }}
-          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:${{ github.sha }}
+          IMAGE="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine"
+          docker tag trading-engine:${{ github.sha }} ${IMAGE}:${{ github.sha }}
+          docker tag trading-engine:${{ github.sha }} ${IMAGE}:prod
+          docker push ${IMAGE}:${{ github.sha }}
+          docker push ${IMAGE}:prod
 
-  # JOB 2: Promote SHA image to :prod and deploy to EC2
-  # No checkout needed — this job only talks to AWS and EC2
   deploy:
     runs-on: ubuntu-latest
-    needs: build
+    needs: publish-image
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
-      # Gives GitHub Actions permission to talk to AWS
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      # Authenticates Docker with ECR so we can pull and retag images
-      - name: Login to ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
-      # Retags the SHA image as :prod in ECR — no rebuild needed
-      # This promotes the exact image that passed CI to production
-      # The SHA tag is preserved so we can always trace :prod back to its commit
-      - name: Promote SHA image to :prod in ECR
-        run: |
-          docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:${{ github.sha }}
-          docker tag ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:${{ github.sha }} ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:prod
-          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:prod
-
-      # Forces k3s to create a new pod regardless of whether image URI changed
-      # kubectl rollout restart adds a timestamp annotation to the pod spec
-      # triggering a new pod which pulls fresh :prod from ECR via imagePullPolicy: Always
-      # No docker login or docker pull needed on EC2 — ECR credential provider
-      # handles authentication automatically via IAM role
-      # KUBECONFIG exported explicitly — appleboy/ssh-action uses non-login shell
-      # so .bashrc is not sourced and KUBECONFIG would not be set otherwise
-      # /usr/local/bin/kubectl used for maximum robustness — avoids PATH issues
-      - name: Restart k3s deployment to pull latest image
+      - name: Pin live deployment to tested SHA
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          script: export KUBECONFIG=/home/ec2-user/.kube/config && /usr/local/bin/kubectl rollout restart deployment/trading-engine
+          script: |
+            export KUBECONFIG=/home/ec2-user/.kube/config
+            /usr/local/bin/kubectl set image deployment/trading-engine \
+              trading-engine=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/trading-engine:${{ github.sha }}
 
-      # Blocks until the new pod passes liveness + readiness probes
-      # --timeout=180s gives the pod 3 minutes to become healthy
-      # If it never becomes healthy, this step fails and pipeline goes red
       - name: Wait for rollout to complete
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          script: export KUBECONFIG=/home/ec2-user/.kube/config && /usr/local/bin/kubectl rollout status deployment/trading-engine --timeout=180s
+          script: |
+            export KUBECONFIG=/home/ec2-user/.kube/config
+            /usr/local/bin/kubectl rollout status deployment/trading-engine --timeout=180s

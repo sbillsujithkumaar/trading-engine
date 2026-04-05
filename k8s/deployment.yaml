@@ -22,9 +22,8 @@ spec:
     spec:
       containers:
         - name: trading-engine
-          # Previously trading-engine:prod (local image built manually on EC2)
-          # Now points to ECR so k3s pulls the image from the registry automatically
-          # This means no manual docker build on EC2 is needed — CI/CD handles everything
+          # Bootstrap keeps :prod so a fresh EC2 node can start immediately.
+          # Normal CI/CD rollouts patch the live Deployment to an immutable SHA tag.
           image: 020880439584.dkr.ecr.eu-north-1.amazonaws.com/trading-engine:prod
           imagePullPolicy: Always
           ports:

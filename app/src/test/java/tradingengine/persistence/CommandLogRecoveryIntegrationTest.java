@@ -100,6 +100,30 @@ class CommandLogRecoveryIntegrationTest {
         log.appendCancel("order-1", Instant.parse("2026-01-01T00:00:02Z"));
     }
 
+    // Rationale: WAL appends should be visible on disk immediately and preserve the JSON-lines format.
+    @Test
+    void appendWritesReadableRecordsImmediately() throws IOException {
+        CommandLog log = new CommandLog(commandsPath());
+
+        Instant orderTs = Instant.parse("2026-01-01T00:00:00Z");
+        Instant cancelTs = Instant.parse("2026-01-01T00:00:01Z");
+        log.appendOrder("order-1", "BUY", 100, 5, orderTs);
+        log.appendCancel("order-1", cancelTs);
+
+        List<String> lines = Files.readAllLines(commandsPath(), StandardCharsets.UTF_8);
+        assertEquals(2, lines.size());
+        assertTrue(lines.get(0).startsWith("{"));
+        assertTrue(lines.get(0).contains("\"type\":\"ORDER\""));
+        assertTrue(lines.get(0).contains("\"timestamp\":\"" + orderTs + "\""));
+        assertTrue(lines.get(1).contains("\"type\":\"CANCEL\""));
+        assertTrue(lines.get(1).contains("\"timestamp\":\"" + cancelTs + "\""));
+
+        List<CommandLog.Record> records = log.readAll();
+        assertEquals(2, records.size());
+        assertEquals(CommandLog.Type.ORDER, records.get(0).type);
+        assertEquals(CommandLog.Type.CANCEL, records.get(1).type);
+    }
+
     // Rationale: The same command history must rebuild the exact same final book and trade stream after restart.
     @Test
     void replayDeterminismSameCommandsProduceSameFinalState() {

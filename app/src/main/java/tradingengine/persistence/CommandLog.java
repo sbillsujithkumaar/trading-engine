@@ -4,8 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
-import java.io.BufferedWriter;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -107,16 +108,19 @@ public final class CommandLog {
             r.hash = sha256Hex(prev + "|" + payload);
 
             String line = MAPPER.writeValueAsString(r);
+            byte[] bytes = (line + System.lineSeparator()).getBytes(StandardCharsets.UTF_8);
 
-            try (BufferedWriter w = Files.newBufferedWriter(
+            try (FileChannel channel = FileChannel.open(
                     path,
-                    StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE,
                     StandardOpenOption.WRITE,
                     StandardOpenOption.APPEND
             )) {
-                w.write(line);
-                w.newLine();
+                ByteBuffer buffer = ByteBuffer.wrap(bytes);
+                while (buffer.hasRemaining()) {
+                    channel.write(buffer);
+                }
+                channel.force(true);
             }
         } catch (IOException e) {
             throw new RuntimeException("Failed to append to command log: " + path, e);
