@@ -83,20 +83,24 @@ echo 'export KUBECONFIG=/home/ec2-user/.kube/config' >> /home/ec2-user/.bashrc
 echo "=== kubeconfig set up ==="
 
 # ── STEP 5: Format and mount EBS volume ──────────────────────────────
-# MUST happen before applying k8s manifests so PVC binds to EBS storage
-# The EBS volume is attached at /dev/nvme1n1 (10GB persistent storage)
-# This volume survives terraform destroy — data is preserved
-# We format it only if it hasn't been formatted before
-# This prevents wiping existing data on reattach
 echo "=== Setting up EBS volume ==="
 
+# Wait for EBS volume to be attached AND filesystem to be readable
+# Loops until blkid can successfully read the device
+# This is more reliable than sleep — waits for the actual condition we need
+echo "=== Waiting for EBS volume to be ready ==="
+for i in $(seq 1 60); do
+  if sudo blkid /dev/nvme1n1 > /dev/null 2>&1; then
+    echo "EBS volume ready after ${i} seconds"
+    break
+  fi
+  sleep 2
+done
+
 # Check if volume already has a filesystem
-# Uses variable assignment to avoid set -e killing the script on pipe failure
-# blkid returns non-zero on unformatted volumes which triggers set -e in pipes
 HAS_FS=$(sudo blkid /dev/nvme1n1 2>/dev/null | grep -c "TYPE" || true)
 
 if [ "$HAS_FS" -eq 0 ]; then
-  # No filesystem found — format it (first time only)
   mkfs -t ext4 /dev/nvme1n1
   echo "=== EBS volume formatted ==="
 else
@@ -106,10 +110,7 @@ fi
 # Create mount point and mount
 mkdir -p /mnt/trading-data
 mount /dev/nvme1n1 /mnt/trading-data
-
-# Persist across reboots
 echo '/dev/nvme1n1 /mnt/trading-data ext4 defaults,nofail 0 2' >> /etc/fstab
-
 echo "=== EBS volume mounted at /mnt/trading-data ==="
 
 # ── STEP 6: Apply Kubernetes manifests ───────────────────────────────
